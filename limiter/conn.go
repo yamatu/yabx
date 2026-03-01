@@ -121,14 +121,9 @@ func (c *ConnLimiter) DelConnCount(user string, ip string) {
 			if i.(int) == 2 {
 				is.Delete(ip)
 			} else {
-				is.Store(user, i.(int)-2)
+				is.Store(ip, i.(int)-2)
 			}
-			notDel := false
-			c.ip.Range(func(_, _ any) bool {
-				notDel = true
-				return false
-			})
-			if !notDel {
+			if isSyncMapEmpty(is) {
 				c.ip.Delete(user)
 			}
 		}
@@ -141,25 +136,37 @@ func (c *ConnLimiter) ClearOnlineIP() {
 		userIp := v.(*sync.Map)
 		notDel := false
 		userIp.Range(func(ip, v any) bool {
-			notDel = true
 			if _, ok := v.(int); ok {
 				if v.(int) == 1 {
 					// clear packet ip for realtime
 					userIp.Delete(ip)
+					return true
 				}
+				notDel = true
 				return true
 			} else {
 				// clear ip for not realtime
-				if v.(time.Time).Before(time.Now().Add(time.Minute)) {
+				if v.(time.Time).Before(time.Now().Add(-time.Minute)) {
 					// 1 minute no active
 					userIp.Delete(ip)
+					return true
 				}
+				notDel = true
 			}
 			return true
 		})
-		if !notDel {
+		if !notDel || isSyncMapEmpty(userIp) {
 			c.ip.Delete(u)
 		}
 		return true
 	})
+}
+
+func isSyncMapEmpty(m *sync.Map) bool {
+	empty := true
+	m.Range(func(_, _ any) bool {
+		empty = false
+		return false
+	})
+	return empty
 }

@@ -214,6 +214,47 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 
 func (l *Limiter) GetOnlineDevice() (*[]panel.OnlineUser, error) {
 	var onlineUser []panel.OnlineUser
+	type onlineKey struct {
+		uid int
+		ip  string
+	}
+	seen := make(map[onlineKey]struct{})
+
+	// Full snapshot from current limiter state, for accurate online count reporting.
+	l.ConnLimiter.ip.Range(func(key, value interface{}) bool {
+		taguuid, ok := key.(string)
+		if !ok {
+			return true
+		}
+		ipMap, ok := value.(*sync.Map)
+		if !ok {
+			return true
+		}
+		v, ok := l.UserLimitInfo.Load(taguuid)
+		if !ok {
+			return true
+		}
+		uid := v.(*UserLimitInfo).UID
+		if uid == 0 {
+			return true
+		}
+		ipMap.Range(func(key, _ interface{}) bool {
+			ip, ok := key.(string)
+			if !ok || ip == "" {
+				return true
+			}
+			k := onlineKey{uid: uid, ip: ip}
+			if _, exists := seen[k]; exists {
+				return true
+			}
+			seen[k] = struct{}{}
+			onlineUser = append(onlineUser, panel.OnlineUser{UID: uid, IP: ip})
+			return true
+		})
+		return true
+	})
+
+	// Keep old behavior for device-limit window cleanup.
 	l.UserOnlineIP.Range(func(key, value interface{}) bool {
 		taguuid := key.(string)
 		ipMap := value.(*sync.Map)
@@ -221,7 +262,6 @@ func (l *Limiter) GetOnlineDevice() (*[]panel.OnlineUser, error) {
 			uid := value.(int)
 			ip := key.(string)
 			l.OldUserOnline.Store(ip, uid)
-			onlineUser = append(onlineUser, panel.OnlineUser{UID: uid, IP: ip})
 			return true
 		})
 		l.UserOnlineIP.Delete(taguuid) // Reset online device

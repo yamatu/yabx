@@ -35,16 +35,23 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		}
 	}
 
-	if onlineDevice, err := c.limiter.GetOnlineDevice(); err != nil {
-		log.Print(err)
-	} else if len(*onlineDevice) > 0 {
-		// Only report user has traffic > 100kb to allow ping test
-		var result []panel.OnlineUser
-		var nocountUID = make(map[int]struct{})
-		for _, traffic := range userTraffic {
-			total := traffic.Upload + traffic.Download
-			if total < int64(c.Options.DeviceOnlineMinTraffic*1000) {
-				nocountUID[traffic.UID] = struct{}{}
+	onlineDevice, err := c.limiter.GetOnlineDevice()
+	if err != nil {
+		log.WithFields(log.Fields{
+			"tag": c.tag,
+			"err": err,
+		}).Info("Get online users failed")
+	} else {
+		// Only report users whose period traffic reaches DeviceOnlineMinTraffic.
+		// Set DeviceOnlineMinTraffic to 0 to report all online users.
+		result := make([]panel.OnlineUser, 0, len(*onlineDevice))
+		nocountUID := make(map[int]struct{})
+		if c.Options.DeviceOnlineMinTraffic > 0 {
+			for _, traffic := range userTraffic {
+				total := traffic.Upload + traffic.Download
+				if total < int64(c.Options.DeviceOnlineMinTraffic*1000) {
+					nocountUID[traffic.UID] = struct{}{}
+				}
 			}
 		}
 		for _, online := range *onlineDevice {

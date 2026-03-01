@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/goccy/go-json"
 )
@@ -25,6 +26,48 @@ type UserListBody struct {
 
 type AliveMap struct {
 	Alive map[int]int `json:"alive"`
+}
+
+func decodeAliveMap(body []byte) map[int]int {
+	alive := make(map[int]int)
+
+	wrapped := &AliveMap{}
+	if err := json.Unmarshal(body, wrapped); err == nil && wrapped.Alive != nil {
+		return wrapped.Alive
+	}
+
+	directInt := make(map[int]int)
+	if err := json.Unmarshal(body, &directInt); err == nil && len(directInt) > 0 {
+		return directInt
+	}
+
+	directStr := make(map[string]int)
+	if err := json.Unmarshal(body, &directStr); err == nil && len(directStr) > 0 {
+		for k, v := range directStr {
+			if uid, err := strconv.Atoi(k); err == nil {
+				alive[uid] = v
+			}
+		}
+		return alive
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err == nil {
+		if raw, ok := payload["alive"]; ok {
+			decoded := decodeAliveMap(raw)
+			if len(decoded) > 0 {
+				return decoded
+			}
+		}
+		if raw, ok := payload["data"]; ok {
+			decoded := decodeAliveMap(raw)
+			if len(decoded) > 0 {
+				return decoded
+			}
+		}
+	}
+
+	return alive
 }
 
 // GetUserList will pull user from v2board
@@ -129,10 +172,7 @@ func (c *Client) GetUserAlive() (map[int]int, error) {
 				return c.AliveMap.Alive, nil
 			}
 			defer r.RawResponse.Body.Close()
-			if err := json.Unmarshal(r.Body(), c.AliveMap); err != nil {
-				fmt.Printf("unmarshal user alive list error: %s", err)
-				c.AliveMap.Alive = make(map[int]int)
-			}
+			c.AliveMap.Alive = decodeAliveMap(r.Body())
 
 			return c.AliveMap.Alive, nil
 		}
@@ -196,33 +236,34 @@ func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 }
 
 func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
+	payload := make(map[int][]string)
+	if data != nil {
+		payload = *data
+	}
+
+	post := func(path string, body interface{}) error {
+		r, err := c.client.R().
+			SetBody(body).
+			ForceContentType("application/json").
+			Post(path)
+		return c.checkResponse(r, path, err)
+	}
+
+	wrapper := map[string]map[int][]string{"alive": payload}
+
 	switch c.PanelType {
 	case "ppanel":
 		const path = "/v1/server/online"
-		r, err := c.client.R().
-			SetBody(data).
-			ForceContentType("application/json").
-			Post(path)
-		err = c.checkResponse(r, path, err)
-
-		if err != nil {
+		if err := post(path, payload); err == nil {
 			return nil
 		}
-
-		return nil
+		return post(path, wrapper)
 	default:
 		const path = "/api/v1/server/UniProxy/alive"
-		r, err := c.client.R().
-			SetBody(data).
-			ForceContentType("application/json").
-			Post(path)
-		err = c.checkResponse(r, path, err)
-
-		if err != nil {
+		if err := post(path, payload); err == nil {
 			return nil
 		}
-
-		return nil
+		return post(path, wrapper)
 	}
 
 }
