@@ -39,6 +39,15 @@ has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+resolve_abs_path() {
+  local p="$1"
+  if has_cmd readlink; then
+    readlink -f "$p" 2>/dev/null || echo "$p"
+    return
+  fi
+  echo "$p"
+}
+
 is_installed() {
   [[ -x "$BIN_PATH" ]]
 }
@@ -129,6 +138,31 @@ ensure_installed() {
     return 1
   fi
   return 0
+}
+
+run_core_binary() {
+  local target="$BIN_PATH"
+  local self_path
+  local target_path
+
+  self_path="$(resolve_abs_path "$0")"
+  target_path="$(resolve_abs_path "$target")"
+
+  if [[ "$target_path" == "$self_path" ]]; then
+    target="/usr/bin/v2bx-bin"
+    target_path="$(resolve_abs_path "$target")"
+  fi
+
+  if [[ ! -x "$target" ]]; then
+    error "核心二进制不存在: $target"
+    return 1
+  fi
+  if [[ "$target_path" == "$self_path" ]]; then
+    error "检测到命令路径冲突，请重新执行安装脚本修复"
+    return 1
+  fi
+
+  "$target" "$@"
 }
 
 start_service() {
@@ -280,14 +314,14 @@ show_x25519() {
   if ! ensure_installed; then
     return 1
   fi
-  "$BIN_PATH" x25519
+  run_core_binary x25519
 }
 
 show_version() {
   if ! ensure_installed; then
     return 1
   fi
-  "$BIN_PATH" version
+  run_core_binary version
 }
 
 show_xhttp_help() {
@@ -414,6 +448,7 @@ main() {
       x25519) show_x25519 ;;
       version) show_version ;;
       xhttp) show_xhttp_help ;;
+      server) run_core_binary "$@" ;;
       install) run_install_script "${2:-}" ;;
       update) run_install_script "${2:-}" ;;
       uninstall) uninstall_v2bx ;;

@@ -395,16 +395,16 @@ install_assets() {
 
 install_manager_scripts() {
   local ref="$1"
-  local manager_target="/usr/bin/V2bX"
+  local menu_target="/usr/bin/v2bx"
   local helper_target="$INSTALL_DIR/initconfig.sh"
-  local manager_source="$INSTALL_DIR/V2bX.sh"
+  local menu_source="$INSTALL_DIR/V2bX.sh"
   local helper_source="$INSTALL_DIR/initconfig.sh"
 
-  if [[ -f "$manager_source" ]]; then
-    cp -f "$manager_source" "$manager_target"
+  if [[ -f "$menu_source" ]]; then
+    cp -f "$menu_source" "$menu_target"
   else
-    if ! download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/V2bX.sh" "$manager_target"; then
-      download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/V2bX.sh" "$manager_target"
+    if ! download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/V2bX.sh" "$menu_target"; then
+      download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/V2bX.sh" "$menu_target"
     fi
   fi
 
@@ -416,9 +416,9 @@ install_manager_scripts() {
     fi
   fi
 
-  chmod +x "$manager_target"
+  chmod +x "$menu_target"
   chmod +x "$helper_target"
-  ln -sf "$manager_target" /usr/bin/v2bx
+  ln -sf "$INSTALL_DIR/$BIN_NAME" /usr/bin/V2bX
   ln -sf "$INSTALL_DIR/$BIN_NAME" /usr/bin/v2bx-bin
 }
 
