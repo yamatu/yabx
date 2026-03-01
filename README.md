@@ -78,8 +78,11 @@ V2BX_SKIP_BASE_INSTALL=1 bash <(curl -Ls https://raw.githubusercontent.com/yamat
 
 ## 构建
 ``` bash
-# 通过-tags选项指定要编译的内核， 可选 xray， sing, hysteria2
-go build -v -o ./V2bX -tags "xray sing hysteria2 with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" -trimpath -ldflags "-s -w -buildid="
+# 默认构建 xray 内核（推荐，支持 xhttp）
+go build -v -o ./V2bX -tags "xray with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" -trimpath -ldflags "-s -w -buildid="
+
+# 如需自定义 tags，可在安装脚本中设置：
+# V2BX_BUILD_TAGS="xray sing hysteria2 with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" bash install.sh
 ```
 
 ## 配置文件及详细使用教程

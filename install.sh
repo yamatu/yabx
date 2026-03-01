@@ -295,6 +295,9 @@ install_build_tools() {
 install_from_source() {
   local ref="$1"
   local src_dir
+  local build_tags
+
+  build_tags="${V2BX_BUILD_TAGS:-xray with_reality_server with_quic with_grpc with_utls with_wireguard with_acme}"
   src_dir="$(mktemp -d /tmp/v2bx-src.XXXXXX)"
 
   log_info "Installing from source ref: ${ref}"
@@ -319,7 +322,7 @@ install_from_source() {
     fi
     export CGO_ENABLED=0
     go mod download
-    go build -v -o "$INSTALL_DIR/$BIN_NAME" -tags "xray sing hysteria2 with_reality_server with_quic with_grpc with_utls with_wireguard with_acme with_gvisor" -trimpath -ldflags "-s -w -buildid="
+    go build -v -o "$INSTALL_DIR/$BIN_NAME" -tags "$build_tags" -trimpath -ldflags "-s -w -buildid="
   )
 
   chmod +x "$INSTALL_DIR/$BIN_NAME"
