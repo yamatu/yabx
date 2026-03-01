@@ -52,19 +52,53 @@ prompt_yes_no() {
 
 prompt_node_type() {
   local n
-  echo "请选择节点协议类型:" >&2
-  echo "1) vless (推荐，可配 xhttp/reality)" >&2
+  echo "请选择节点类型:" >&2
+  echo "1) vless + xhttp (推荐)" >&2
   echo "2) vmess" >&2
   echo "3) trojan" >&2
   echo "4) shadowsocks" >&2
+  echo "5) vless (手动模式)" >&2
   while true; do
-    read -r -p "输入 [1-4]: " n
+    read -r -p "输入 [1-5]: " n
     case "$n" in
-      1) printf 'vless'; return ;;
+      1) printf 'vless_xhttp'; return ;;
       2) printf 'vmess'; return ;;
       3) printf 'trojan'; return ;;
       4) printf 'shadowsocks'; return ;;
-      *) wizard_warn "请输入 1-4" ;;
+      5) printf 'vless'; return ;;
+      *) wizard_warn "请输入 1-5" ;;
+    esac
+  done
+}
+
+prompt_xhttp_security_mode() {
+  local n
+  echo "xhttp 安全模式:" >&2
+  echo "1) reality (默认，推荐)" >&2
+  echo "2) tls" >&2
+  while true; do
+    read -r -p "输入 [1-2，默认1]: " n
+    case "$n" in
+      ""|1) printf 'reality'; return ;;
+      2) printf 'tls'; return ;;
+      *) wizard_warn "请输入 1 或 2" ;;
+    esac
+  done
+}
+
+prompt_vless_security_mode() {
+  local n
+  echo "vless 安全模式:" >&2
+  echo "1) reality" >&2
+  echo "2) tls" >&2
+  echo "3) none" >&2
+  while true; do
+    read -r -p "输入 [1-3，默认3]: " n
+    case "$n" in
+      1) printf 'reality'; return ;;
+      2) printf 'tls'; return ;;
+      ""|3) printf 'none'; return ;;
+      *) wizard_warn "请输入 1-3" ;;
     esac
   done
 }
@@ -123,15 +157,19 @@ generate_config_file() {
   local api_key
   local fixed_api="0"
   local continue_add="1"
+  local node_choice
   local cert_mode
   local cert_domain
   local node_name
   local node_type
+  local transport_mode
+  local security_mode
   local node_id
   local total_nodes
   local i
 
   declare -a NODE_BLOCKS
+  declare -a XHTTP_HINTS
 
   echo "V2bX 配置向导"
   echo "- 主配置文件将写入: $CONFIG_FILE"
@@ -167,11 +205,47 @@ generate_config_file() {
       wizard_warn "NodeID 必须是数字"
     done
 
-    node_type="$(prompt_node_type)"
-    cert_mode="$(prompt_cert_mode)"
+    node_choice="$(prompt_node_type)"
+    node_type="$node_choice"
+    transport_mode=""
+    security_mode="none"
+    cert_mode="none"
     cert_domain=""
-    if [[ "$cert_mode" != "none" ]]; then
-      cert_domain="$(prompt_non_empty '请输入证书域名(例如 node.example.com): ')"
+
+    if [[ "$node_choice" == "vless_xhttp" ]]; then
+      node_type="vless"
+      transport_mode="xhttp"
+      security_mode="$(prompt_xhttp_security_mode)"
+      if [[ "$security_mode" == "tls" ]]; then
+        cert_mode="$(prompt_cert_mode)"
+        while [[ "$cert_mode" == "none" ]]; do
+          wizard_warn "xhttp + tls 需要证书，CertMode 不能为 none"
+          cert_mode="$(prompt_cert_mode)"
+        done
+        cert_domain="$(prompt_non_empty '请输入证书域名(例如 node.example.com): ')"
+      else
+        cert_mode="none"
+      fi
+      XHTTP_HINTS+=("${node_name}:${security_mode}")
+    elif [[ "$node_choice" == "vless" ]]; then
+      security_mode="$(prompt_vless_security_mode)"
+      if [[ "$security_mode" == "tls" ]]; then
+        cert_mode="$(prompt_cert_mode)"
+        while [[ "$cert_mode" == "none" ]]; do
+          wizard_warn "vless + tls 需要证书，CertMode 不能为 none"
+          cert_mode="$(prompt_cert_mode)"
+        done
+        cert_domain="$(prompt_non_empty '请输入证书域名(例如 node.example.com): ')"
+      elif [[ "$security_mode" == "reality" ]]; then
+        cert_mode="none"
+      fi
+    else
+      if prompt_yes_no "该节点是否启用 TLS 证书配置" 0; then
+        cert_mode="$(prompt_cert_mode)"
+        if [[ "$cert_mode" != "none" ]]; then
+          cert_domain="$(prompt_non_empty '请输入证书域名(例如 node.example.com): ')"
+        fi
+      fi
     fi
 
     NODE_BLOCKS+=("    {
@@ -262,6 +336,13 @@ EOF
   wizard_info "配置生成完成: $CONFIG_FILE"
   wizard_info "如果你要使用 xhttp，请在面板把 VLESS 节点 network 设置为 xhttp"
   wizard_info "可参考: ${CONFIG_DIR}/xhttp_template.conf"
+  if [[ ${#XHTTP_HINTS[@]} -gt 0 ]]; then
+    wizard_info "本次向导已选择 xhttp 的节点:"
+    for i in "${!XHTTP_HINTS[@]}"; do
+      wizard_info "- ${XHTTP_HINTS[$i]}"
+    done
+    wizard_info "面板侧请同步设置: network=xhttp；security=对应 reality/tls"
+  fi
 
   restart_service_if_needed
 }

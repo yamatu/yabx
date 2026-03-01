@@ -79,6 +79,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yav2bx/main/install.sh)
 - 自定义入站：`/etc/V2bX/custom_inbound.json`
 
 可通过 `v2bx` 菜单中的 `0` 编辑主配置，或 `13` 使用向导新建/重建配置。
+`13` 向导已支持 `vless + xhttp` 预设，并可选择 `reality`（默认）或 `tls`。
 
 ### XHTTP 使用说明
 
