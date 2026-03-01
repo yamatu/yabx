@@ -52,21 +52,33 @@ A V2board node server based on multi core, modified from XrayR.
 wget -N https://raw.githubusercontent.com/yamatu/yav2bx/main/install.sh && bash install.sh
 
 # 安装指定版本
-bash install.sh v1.0.1
+bash install.sh v1.0.2
 
 # 系统 apt/dpkg 异常时，跳过基础依赖安装
-V2BX_SKIP_BASE_INSTALL=1 bash install.sh v1.0.1
+V2BX_SKIP_BASE_INSTALL=1 bash install.sh v1.0.2
 
 # 或者使用 curl 管道方式
-bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yav2bx/main/install.sh) v1.0.1
+bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yav2bx/main/install.sh) v1.0.2
 ```
 
 安装脚本会自动写入 systemd 服务，并保留你已有的 `/etc/V2bX/config.json`。首次安装会额外放置 XHTTP 示例配置：
+
+安装完成后，执行 `v2bx` 会进入数字菜单（0/1/2...）管理模式，可直接进行安装/更新/重启/日志/配置生成等操作。
 
 若仓库暂未发布 Release，脚本会自动切换为源码编译安装（默认包含 xray 内核编译标签），同样可用 xhttp。
 
 - `/etc/V2bX/config_xhttp_reality.json`
 - `/etc/V2bX/xhttp_template.conf`
+
+### 配置文件位置
+
+- 主配置：`/etc/V2bX/config.json`
+- DNS 配置：`/etc/V2bX/dns.json`
+- 路由配置：`/etc/V2bX/route.json`
+- 自定义出站：`/etc/V2bX/custom_outbound.json`
+- 自定义入站：`/etc/V2bX/custom_inbound.json`
+
+可通过 `v2bx` 菜单中的 `0` 编辑主配置，或 `13` 使用向导新建/重建配置。
 
 ### XHTTP 使用说明
 

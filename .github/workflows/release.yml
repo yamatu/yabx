@@ -152,6 +152,8 @@ jobs:
         run: |
           cp ${GITHUB_WORKSPACE}/README.md ./build_assets/README.md
           cp ${GITHUB_WORKSPACE}/LICENSE ./build_assets/LICENSE
+          cp ${GITHUB_WORKSPACE}/V2bX.sh ./build_assets/V2bX.sh
+          cp ${GITHUB_WORKSPACE}/initconfig.sh ./build_assets/initconfig.sh
           cp ${GITHUB_WORKSPACE}/example/*.json ./build_assets/
           cp ${GITHUB_WORKSPACE}/xhttp配置模板.conf ./build_assets/ || true
           LIST=('geoip' 'geosite')

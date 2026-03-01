@@ -32,6 +32,20 @@ has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+download_file() {
+  local url="$1"
+  local dst="$2"
+  if has_cmd curl; then
+    curl -fsSL "$url" -o "$dst"
+    return $?
+  fi
+  if has_cmd wget; then
+    wget -q -O "$dst" "$url"
+    return $?
+  fi
+  return 1
+}
+
 require_root() {
   if [[ ${EUID:-0} -ne 0 ]]; then
     log_error "Please run this script as root"
@@ -242,8 +256,6 @@ install_binary() {
   rm -f "$zip_file"
 
   chmod +x "$INSTALL_DIR/$BIN_NAME"
-  ln -sf "$INSTALL_DIR/$BIN_NAME" /usr/bin/V2bX
-  ln -sf /usr/bin/V2bX /usr/bin/v2bx
 }
 
 install_build_tools() {
@@ -326,8 +338,6 @@ install_from_source() {
   )
 
   chmod +x "$INSTALL_DIR/$BIN_NAME"
-  ln -sf "$INSTALL_DIR/$BIN_NAME" /usr/bin/V2bX
-  ln -sf /usr/bin/V2bX /usr/bin/v2bx
 
   if [[ -d "$src_dir/example" ]]; then
     for file in config.json dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json geoip.dat geosite.dat; do
@@ -338,6 +348,12 @@ install_from_source() {
   fi
   if [[ -f "$src_dir/xhttp配置模板.conf" ]]; then
     cp -f "$src_dir/xhttp配置模板.conf" "$INSTALL_DIR/xhttp配置模板.conf"
+  fi
+  if [[ -f "$src_dir/V2bX.sh" ]]; then
+    cp -f "$src_dir/V2bX.sh" "$INSTALL_DIR/V2bX.sh"
+  fi
+  if [[ -f "$src_dir/initconfig.sh" ]]; then
+    cp -f "$src_dir/initconfig.sh" "$INSTALL_DIR/initconfig.sh"
   fi
 
   rm -rf "$src_dir"
@@ -375,6 +391,35 @@ install_assets() {
       curl -fsSL "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/xhttp%E9%85%8D%E7%BD%AE%E6%A8%A1%E6%9D%BF.conf" -o "$CONFIG_DIR/xhttp_template.conf" || true
     fi
   fi
+}
+
+install_manager_scripts() {
+  local ref="$1"
+  local manager_target="/usr/bin/V2bX"
+  local helper_target="$INSTALL_DIR/initconfig.sh"
+  local manager_source="$INSTALL_DIR/V2bX.sh"
+  local helper_source="$INSTALL_DIR/initconfig.sh"
+
+  if [[ -f "$manager_source" ]]; then
+    cp -f "$manager_source" "$manager_target"
+  else
+    if ! download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/V2bX.sh" "$manager_target"; then
+      download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/V2bX.sh" "$manager_target"
+    fi
+  fi
+
+  if [[ -f "$helper_source" ]]; then
+    chmod +x "$helper_source"
+  else
+    if ! download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/initconfig.sh" "$helper_target"; then
+      download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/initconfig.sh" "$helper_target"
+    fi
+  fi
+
+  chmod +x "$manager_target"
+  chmod +x "$helper_target"
+  ln -sf "$manager_target" /usr/bin/v2bx
+  ln -sf "$INSTALL_DIR/$BIN_NAME" /usr/bin/v2bx-bin
 }
 
 install_service() {
@@ -430,6 +475,13 @@ main() {
   fi
 
   install_assets
+  local script_ref="main"
+  if [[ "$INSTALL_MODE" == "release" && -n "$VERSION" ]]; then
+    script_ref="$VERSION"
+  elif [[ "$INSTALL_MODE" == "source" && -n "$SOURCE_REF" ]]; then
+    script_ref="$SOURCE_REF"
+  fi
+  install_manager_scripts "$script_ref"
   install_service
 
   if [[ "$had_config" == "1" ]]; then
@@ -444,7 +496,8 @@ main() {
     log_info "Start command: systemctl start V2bX"
   fi
 
-  log_info "Done. Management commands: V2bX start|stop|restart|log|update"
+  log_info "Done. Run 'v2bx' to open interactive menu"
+  log_info "Direct binary command: /usr/local/V2bX/V2bX"
 }
 
 main "$@"
