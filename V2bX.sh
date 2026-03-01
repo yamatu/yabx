@@ -435,26 +435,27 @@ main() {
   require_root
 
   if [[ $# -gt 0 ]]; then
+    local rc=0
     case "$1" in
-      start) start_service ;;
-      stop) stop_service ;;
-      restart) restart_service ;;
-      status) status_service ;;
-      log) log_service ;;
-      enable) enable_service ;;
-      disable) disable_service ;;
-      config) edit_config ;;
-      generate) generate_config ;;
-      x25519) show_x25519 ;;
-      version) show_version ;;
-      xhttp) show_xhttp_help ;;
-      server) run_core_binary "$@" ;;
-      install) run_install_script "${2:-}" ;;
-      update) run_install_script "${2:-}" ;;
-      uninstall) uninstall_v2bx ;;
-      *) show_usage ;;
+      start) start_service || rc=$? ;;
+      stop) stop_service || rc=$? ;;
+      restart) restart_service || rc=$? ;;
+      status) status_service || rc=$? ;;
+      log) log_service || rc=$? ;;
+      enable) enable_service || rc=$? ;;
+      disable) disable_service || rc=$? ;;
+      config) edit_config || rc=$? ;;
+      generate) generate_config || rc=$? ;;
+      x25519) show_x25519 || rc=$? ;;
+      version) show_version || rc=$? ;;
+      xhttp) show_xhttp_help || rc=$? ;;
+      server) run_core_binary "$@" || rc=$? ;;
+      install) run_install_script "${2:-}" || rc=$? ;;
+      update) run_install_script "${2:-}" || rc=$? ;;
+      uninstall) uninstall_v2bx || rc=$? ;;
+      *) show_usage; rc=1 ;;
     esac
-    exit 0
+    exit "$rc"
   fi
 
   menu_loop

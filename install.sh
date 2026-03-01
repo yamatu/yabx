@@ -396,9 +396,15 @@ install_assets() {
 install_manager_scripts() {
   local ref="$1"
   local menu_target="/usr/bin/v2bx"
+  local core_cmd_target="/usr/bin/V2bX"
+  local core_bin_link="/usr/bin/v2bx-bin"
   local helper_target="$INSTALL_DIR/initconfig.sh"
   local menu_source="$INSTALL_DIR/V2bX.sh"
   local helper_source="$INSTALL_DIR/initconfig.sh"
+
+  # Clean old symlinks/files first to avoid cp following symlink
+  # and accidentally overwriting /usr/local/V2bX/V2bX.
+  rm -f "$menu_target" "$core_cmd_target" "$core_bin_link"
 
   if [[ -f "$menu_source" ]]; then
     cp -f "$menu_source" "$menu_target"
@@ -418,8 +424,8 @@ install_manager_scripts() {
 
   chmod +x "$menu_target"
   chmod +x "$helper_target"
-  ln -sf "$INSTALL_DIR/$BIN_NAME" /usr/bin/V2bX
-  ln -sf "$INSTALL_DIR/$BIN_NAME" /usr/bin/v2bx-bin
+  ln -s "$INSTALL_DIR/$BIN_NAME" "$core_cmd_target"
+  ln -s "$INSTALL_DIR/$BIN_NAME" "$core_bin_link"
 }
 
 install_service() {
