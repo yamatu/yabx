@@ -43,10 +43,12 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		}).Info("Get online users failed")
 	} else {
 		// Only report users whose period traffic reaches DeviceOnlineMinTraffic.
-		// Set DeviceOnlineMinTraffic to 0 to report all online users.
+		// Keep traffic filter behavior for ppanel only.
+		// XBoard/UniProxy expects real-time online device reporting even with tiny traffic.
 		result := make([]panel.OnlineUser, 0, len(*onlineDevice))
 		nocountUID := make(map[int]struct{})
-		if c.Options.DeviceOnlineMinTraffic > 0 {
+		applyTrafficFilter := c.apiClient.PanelType == "ppanel" && c.Options.DeviceOnlineMinTraffic > 0
+		if applyTrafficFilter {
 			for _, traffic := range userTraffic {
 				total := traffic.Upload + traffic.Download
 				if total < int64(c.Options.DeviceOnlineMinTraffic*1000) {

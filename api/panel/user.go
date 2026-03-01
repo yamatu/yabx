@@ -51,6 +51,27 @@ func decodeAliveMap(body []byte) map[int]int {
 		return alive
 	}
 
+	directAny := make(map[string]interface{})
+	if err := json.Unmarshal(body, &directAny); err == nil && len(directAny) > 0 {
+		for k, v := range directAny {
+			uid, err := strconv.Atoi(k)
+			if err != nil {
+				continue
+			}
+			switch n := v.(type) {
+			case float64:
+				alive[uid] = int(n)
+			case string:
+				if iv, err := strconv.Atoi(n); err == nil {
+					alive[uid] = iv
+				}
+			}
+		}
+		if len(alive) > 0 {
+			return alive
+		}
+	}
+
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err == nil {
 		if raw, ok := payload["alive"]; ok {
