@@ -10,7 +10,26 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func (c *Controller) normalizedPushInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		interval = 60 * time.Second
+	}
+
+	if c.apiClient.PanelType != "ppanel" {
+		if interval < 20*time.Second {
+			interval = 20 * time.Second
+		}
+		if interval > 4*time.Minute {
+			interval = 4 * time.Minute
+		}
+	}
+
+	return interval
+}
+
 func (c *Controller) startTasks(node *panel.NodeInfo) {
+	pushInterval := c.normalizedPushInterval(node.PushInterval)
+
 	// fetch node info task
 	c.nodeInfoMonitorPeriodic = &task.Task{
 		Interval: node.PullInterval,
@@ -18,14 +37,14 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 	}
 	// fetch user list task
 	c.userReportPeriodic = &task.Task{
-		Interval: node.PushInterval,
+		Interval: pushInterval,
 		Execute:  c.reportUserTrafficTask,
 	}
 	log.WithField("tag", c.tag).Info("Start monitor node status")
 	// delay to start nodeInfoMonitor
 	_ = c.nodeInfoMonitorPeriodic.Start(false)
 	log.WithField("tag", c.tag).Info("Start report node status")
-	_ = c.userReportPeriodic.Start(false)
+	_ = c.userReportPeriodic.Start(true)
 	if node.Security == panel.Tls {
 		switch c.CertConfig.CertMode {
 		case "none", "", "file", "self":
@@ -157,11 +176,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			c.nodeInfoMonitorPeriodic.Close()
 			_ = c.nodeInfoMonitorPeriodic.Start(false)
 		}
-		if c.userReportPeriodic.Interval != newN.PushInterval &&
-			newN.PushInterval != 0 {
-			c.userReportPeriodic.Interval = newN.PushInterval
+		newPushInterval := c.normalizedPushInterval(newN.PushInterval)
+		if c.userReportPeriodic.Interval != newPushInterval {
+			c.userReportPeriodic.Interval = newPushInterval
 			c.userReportPeriodic.Close()
-			_ = c.userReportPeriodic.Start(false)
+			_ = c.userReportPeriodic.Start(true)
 		}
 		log.WithField("tag", c.tag).Infof("Added %d new users", len(c.userList))
 		// exit

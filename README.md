@@ -98,6 +98,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yav2bx/main/install.sh)
 - 在线设备上报（`/alive`）支持 uid 映射，并兼容更多 XBoard v1/v2 路径。
 - 节点状态上报（`/status`）支持 XBoard 所需结构：`cpu`、`mem.total/used`、`swap.total/used`、`disk.total/used`。
 - 节点在线数会按 `uid+ip` 粒度尽量贴近设备数；若同一用户在同一公网 IP 下多设备并发，要做到绝对精确需每设备独立 UUID。
+- XBoard 的节点红绿灯绿色依赖 `last_check_at` + `last_push_at`；后端已针对 XBoard 将上报周期约束在 20s~4m，并在启动时立即上报一次。
 - XBoard 的在线/流量统计由队列异步入库，请确保队列在运行：`php artisan queue:work --queue=online_sync,traffic_fetch,stat,default --tries=1`。
 
 ### 手动安装

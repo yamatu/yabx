@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const nonRealtimeOnlineTTL = 5 * time.Minute
+
 type ConnLimiter struct {
 	realtime  bool
 	ipLimit   int
@@ -145,8 +147,8 @@ func (c *ConnLimiter) ClearOnlineIP() {
 				return true
 			} else {
 				// clear ip for not realtime
-				if v.(time.Time).Before(time.Now().Add(-time.Minute)) {
-					// 1 minute no active
+				if v.(time.Time).Before(time.Now().Add(-nonRealtimeOnlineTTL)) {
+					// ttl no active
 					userIp.Delete(ip)
 					return true
 				}
