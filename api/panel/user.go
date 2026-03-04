@@ -221,6 +221,7 @@ type UserTraffic struct {
 	UID      int
 	Upload   int64
 	Download int64
+	Key      string `json:"-"`
 }
 
 // ReportUserTraffic reports the user traffic
@@ -252,7 +253,11 @@ func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 	default:
 		data := make(map[string][]int64, len(userTraffic))
 		for i := range userTraffic {
-			data[strconv.Itoa(userTraffic[i].UID)] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
+			key := strconv.Itoa(userTraffic[i].UID)
+			if userTraffic[i].Key != "" {
+				key = userTraffic[i].Key
+			}
+			data[key] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
 		}
 
 		paths := []string{

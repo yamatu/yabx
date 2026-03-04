@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/InazumaV/V2bX/api/panel"
@@ -60,11 +61,22 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 
 		// XBoard node online count is based on /push payload count.
 		// Include zero-traffic online users for non-ppanel to keep node online count accurate.
+		// For users with multiple online IPs, append virtual zero-traffic keys so node online count reflects devices (uid+ip granularity).
 		if c.apiClient.PanelType != "ppanel" {
+			devicePerUID := make(map[int]int)
 			for _, onlineuser := range result {
-				if _, ok := reportedUID[onlineuser.UID]; !ok {
-					userTraffic = append(userTraffic, panel.UserTraffic{UID: onlineuser.UID, Upload: 0, Download: 0})
-					reportedUID[onlineuser.UID] = struct{}{}
+				devicePerUID[onlineuser.UID]++
+			}
+
+			for uid, deviceCount := range devicePerUID {
+				if _, ok := reportedUID[uid]; !ok {
+					userTraffic = append(userTraffic, panel.UserTraffic{UID: uid, Upload: 0, Download: 0})
+					reportedUID[uid] = struct{}{}
+				}
+
+				for i := 2; i <= deviceCount; i++ {
+					key := fmt.Sprintf("d_%d_%d", uid, i)
+					userTraffic = append(userTraffic, panel.UserTraffic{UID: uid, Upload: 0, Download: 0, Key: key})
 				}
 			}
 		}
