@@ -11,6 +11,7 @@ import (
 func (c *Controller) reportUserTrafficTask() (err error) {
 	// Get User traffic
 	userTraffic := make([]panel.UserTraffic, 0)
+	reportedUID := make(map[int]struct{})
 	for i := range c.userList {
 		up, down := c.server.GetUserTraffic(c.tag, c.userList[i].Uuid, true)
 		if up > 0 || down > 0 {
@@ -21,17 +22,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 				UID:      (c.userList)[i].Id,
 				Upload:   up,
 				Download: down})
-		}
-	}
-	if len(userTraffic) > 0 {
-		err = c.apiClient.ReportUserTraffic(userTraffic)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Info("Report user traffic failed")
-		} else {
-			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
+			reportedUID[(c.userList)[i].Id] = struct{}{}
 		}
 	}
 
@@ -66,6 +57,18 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 			// json structure: { UID1:["ip1","ip2"],UID2:["ip3","ip4"] }
 			data[onlineuser.UID] = append(data[onlineuser.UID], onlineuser.IP)
 		}
+
+		// XBoard node online count is based on /push payload count.
+		// Include zero-traffic online users for non-ppanel to keep node online count accurate.
+		if c.apiClient.PanelType != "ppanel" {
+			for _, onlineuser := range result {
+				if _, ok := reportedUID[onlineuser.UID]; !ok {
+					userTraffic = append(userTraffic, panel.UserTraffic{UID: onlineuser.UID, Upload: 0, Download: 0})
+					reportedUID[onlineuser.UID] = struct{}{}
+				}
+			}
+		}
+
 		if err = c.apiClient.ReportNodeOnlineUsers(&data); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
@@ -75,6 +78,19 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", len(*onlineDevice), len(result))
 		}
 	}
+
+	if len(userTraffic) > 0 {
+		err = c.apiClient.ReportUserTraffic(userTraffic)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"tag": c.tag,
+				"err": err,
+			}).Info("Report user traffic failed")
+		} else {
+			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
+		}
+	}
+
 	status, statusErr := serverstatus.GetSystemStatus()
 	if statusErr != nil {
 		log.WithFields(log.Fields{

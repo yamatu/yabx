@@ -250,20 +250,28 @@ func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 		}
 		return nil
 	default:
-		data := make(map[int][]int64, len(userTraffic))
+		data := make(map[string][]int64, len(userTraffic))
 		for i := range userTraffic {
-			data[userTraffic[i].UID] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
+			data[strconv.Itoa(userTraffic[i].UID)] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
 		}
-		const path = "/api/v1/server/UniProxy/push"
-		r, err := c.client.R().
-			SetBody(data).
-			ForceContentType("application/json").
-			Post(path)
-		err = c.checkResponse(r, path, err)
-		if err != nil {
-			return err
+
+		paths := []string{
+			"/api/v1/server/UniProxy/push",
+			"/api/v2/server/push",
+			"/api/v1/server/push",
 		}
-		return nil
+		var lastErr error
+		for _, path := range paths {
+			r, err := c.client.R().
+				SetBody(data).
+				ForceContentType("application/json").
+				Post(path)
+			if err = c.checkResponse(r, path, err); err == nil {
+				return nil
+			}
+			lastErr = err
+		}
+		return lastErr
 	}
 
 }

@@ -92,6 +92,13 @@ bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yav2bx/main/install.sh)
 - 若面板的 `headers`/`sockopt`/`tlsSettings` 传空数组（`[]`），会导致 xray 报错；建议面板侧传对象（`{}`）。
 - 若 `mode=stream-one` 且面板仍下发了 `downloadSettings`，后端会自动忽略该字段以避免启动失败。
 
+### XBoard 对接说明
+
+- 用户流量上报（`/push`）按 **用户 ID(uid)** 统计，不是 uuid。
+- 在线设备上报（`/alive`）支持 uid 映射，并兼容更多 XBoard v1/v2 路径。
+- 节点状态上报（`/status`）支持 XBoard 所需结构：`cpu`、`mem.total/used`、`swap.total/used`、`disk.total/used`。
+- XBoard 的在线/流量统计由队列异步入库，请确保队列在运行：`php artisan queue:work --queue=online_sync,traffic_fetch,stat,default --tries=1`。
+
 ### 手动安装
 
 [手动安装教程](https://v2bx.v-50.me/v2bx/v2bx-xia-zai-he-an-zhuang/install/manual)
