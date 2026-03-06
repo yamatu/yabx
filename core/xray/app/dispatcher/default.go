@@ -35,12 +35,15 @@ var errSniffingTimeout = errors.New("timeout on sniffing")
 
 type cachedReader struct {
 	sync.Mutex
-	reader *pipe.Reader
+	reader buf.TimeoutReader
 	cache  buf.MultiBuffer
 }
 
-func (r *cachedReader) Cache(b *buf.Buffer) {
-	mb, _ := r.reader.ReadMultiBufferTimeout(time.Millisecond * 100)
+func (r *cachedReader) Cache(b *buf.Buffer, deadline time.Duration) error {
+	mb, err := r.reader.ReadMultiBufferTimeout(deadline)
+	if err != nil {
+		return err
+	}
 	r.Lock()
 	if !mb.IsEmpty() {
 		r.cache, _ = buf.MergeMulti(r.cache, mb)
@@ -56,6 +59,7 @@ func (r *cachedReader) Cache(b *buf.Buffer) {
 	n := r.cache.Copy(rawBytes)
 	b.Resize(0, int32(n))
 	r.Unlock()
+	return nil
 }
 
 func (r *cachedReader) readInternal() buf.MultiBuffer {
@@ -95,7 +99,27 @@ func (r *cachedReader) Interrupt() {
 		r.cache = buf.ReleaseMulti(r.cache)
 	}
 	r.Unlock()
-	r.reader.Interrupt()
+	common.Interrupt(r.reader)
+}
+
+func newCachedReader(reader buf.Reader) *cachedReader {
+	if timeoutReader, ok := reader.(buf.TimeoutReader); ok {
+		return &cachedReader{reader: timeoutReader}
+	}
+
+	return &cachedReader{
+		reader: &buf.TimeoutWrapperReader{Reader: reader},
+	}
+}
+
+func sourceIPString(inbound *session.Inbound) string {
+	if inbound == nil {
+		return ""
+	}
+	if inbound.Source.Address.Family().IsIP() {
+		return inbound.Source.Address.IP().String()
+	}
+	return inbound.Source.Address.String()
 }
 
 // DefaultDispatcher is a default implementation of Dispatcher.
@@ -182,7 +206,7 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 		}
 		// Speed Limit and Device Limit
 		w, reject := limit.CheckLimit(user.Email,
-			sessionInbound.Source.Address.IP().String(),
+			sourceIPString(sessionInbound),
 			network == net.Network_TCP,
 			sessionInbound.Source.Network == net.Network_TCP)
 		if reject {
@@ -219,6 +243,70 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 	}
 
 	return inboundLink, outboundLink, limit, nil
+}
+
+func (d *DefaultDispatcher) wrapLink(ctx context.Context, link *transport.Link, network net.Network) (*transport.Link, *limiter.Limiter, error) {
+	if link == nil {
+		return nil, nil, errors.New("nil transport link")
+	}
+
+	timeoutReader := &buf.TimeoutWrapperReader{Reader: link.Reader}
+	link.Reader = timeoutReader
+
+	sessionInbound := session.InboundFromContext(ctx)
+	var user *protocol.MemoryUser
+	if sessionInbound != nil {
+		user = sessionInbound.User
+		sessionInbound.CanSpliceCopy = 3
+	}
+
+	if user == nil || len(user.Email) == 0 {
+		return link, nil, nil
+	}
+
+	limit, err := limiter.GetLimiter(sessionInbound.Tag)
+	if err != nil {
+		errors.LogInfo(ctx, "get limiter ", sessionInbound.Tag, " error: ", err)
+		common.Close(link.Writer)
+		common.Interrupt(link.Reader)
+		return nil, nil, errors.New("get limiter ", sessionInbound.Tag, " error: ", err)
+	}
+
+	w, reject := limit.CheckLimit(
+		user.Email,
+		sourceIPString(sessionInbound),
+		network == net.Network_TCP,
+		sessionInbound.Source.Network == net.Network_TCP,
+	)
+	if reject {
+		errors.LogInfo(ctx, "Limited ", user.Email, " by conn or ip")
+		common.Close(link.Writer)
+		common.Interrupt(link.Reader)
+		return nil, nil, errors.New("Limited ", user.Email, " by conn or ip")
+	}
+	if w != nil {
+		timeoutReader.Reader = rate.NewRateLimitReader(timeoutReader.Reader, w)
+		link.Writer = rate.NewRateLimitWriter(link.Writer, w)
+	}
+
+	p := d.policy.ForLevel(user.Level)
+	if p.Stats.UserUplink {
+		name := "user>>>" + user.Email + ">>>traffic>>>uplink"
+		if c, _ := stats.GetOrRegisterCounter(d.stats, name); c != nil {
+			timeoutReader.Counter = c
+		}
+	}
+	if p.Stats.UserDownlink {
+		name := "user>>>" + user.Email + ">>>traffic>>>downlink"
+		if c, _ := stats.GetOrRegisterCounter(d.stats, name); c != nil {
+			link.Writer = &SizeStatWriter{
+				Counter: c,
+				Writer:  link.Writer,
+			}
+		}
+	}
+
+	return link, limit, nil
 }
 
 func (d *DefaultDispatcher) shouldOverride(ctx context.Context, result SniffResult, request session.SniffingRequest, destination net.Destination) bool {
@@ -293,9 +381,7 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 		go d.routedDispatch(ctx, outbound, destination, l, "")
 	} else {
 		go func() {
-			cReader := &cachedReader{
-				reader: outbound.Reader.(*pipe.Reader),
-			}
+			cReader := newCachedReader(outbound.Reader)
 			outbound.Reader = cReader
 			result, err := sniffer(ctx, cReader, sniffingRequest.MetadataOnly, destination.Network)
 			if err == nil {
@@ -343,17 +429,15 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 		content = new(session.Content)
 		ctx = session.ContextWithContent(ctx, content)
 	}
+	outbound, l, err := d.wrapLink(ctx, outbound, destination.Network)
+	if err != nil {
+		return err
+	}
 	sniffingRequest := content.SniffingRequest
 	if !sniffingRequest.Enabled {
-		d.routedDispatch(ctx, outbound, destination, nil, "")
+		d.routedDispatch(ctx, outbound, destination, l, "")
 	} else {
-		pr, ok := outbound.Reader.(*pipe.Reader)
-		if !ok {
-			// 无法获取原始 pipe.Reader 时，跳过嗅探，直接转发以避免 panic
-			d.routedDispatch(ctx, outbound, destination, nil, "")
-			return nil
-		}
-		cReader := &cachedReader{reader: pr}
+		cReader := newCachedReader(outbound.Reader)
 		outbound.Reader = cReader
 		result, err := sniffer(ctx, cReader, sniffingRequest.MetadataOnly, destination.Network)
 		if err == nil {
@@ -378,7 +462,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 			}
 			destination.Address.Family()
 		}
-		d.routedDispatch(ctx, outbound, destination, nil, content.Protocol)
+		d.routedDispatch(ctx, outbound, destination, l, content.Protocol)
 	}
 
 	return nil
@@ -408,7 +492,9 @@ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool, netw
 					return nil, errSniffingTimeout
 				}
 
-				cReader.Cache(payload)
+				if err := cReader.Cache(payload, time.Millisecond*100); err != nil {
+					return nil, err
+				}
 				if !payload.IsEmpty() {
 					result, err := sniffer.Sniff(ctx, payload.Bytes(), network)
 					if err != common.ErrNoClue {
@@ -437,7 +523,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 			// del connect count
 			if destination.Network == net.Network_TCP {
 				defer func() {
-					l.ConnLimiter.DelConnCount(sessionInbound.User.Email, sessionInbound.Source.Address.IP().String())
+					l.ConnLimiter.DelConnCount(sessionInbound.User.Email, sourceIPString(sessionInbound))
 				}()
 			}
 		} else {
