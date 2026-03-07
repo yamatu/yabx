@@ -21,7 +21,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.19.0
-	github.com/xtls/xray-core v1.251015.0
+	github.com/xtls/xray-core v1.251208.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.44.0
 	golang.org/x/sys v0.38.0
@@ -341,8 +341,6 @@ require (
 replace github.com/sagernet/sing-box v1.12.0 => github.com/Fearless743/sing-box_mod v1.12.0-anytls
 
 replace github.com/anytls/sing-anytls v0.0.8 => github.com/Fearless743/sing-anytls v0.0.9
-
-replace github.com/xtls/xray-core => ./Xray-core-25.12.8
 
 replace github.com/quic-go/quic-go => github.com/quic-go/quic-go v0.56.0
 
