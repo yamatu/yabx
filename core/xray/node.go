@@ -71,6 +71,7 @@ func (c *Xray) addOutbound(config *core.OutboundHandlerConfig) error {
 }
 
 func (c *Xray) DelNode(tag string) error {
+	c.shm.UnregisterOnlineMap(inboundOnlineStatName(tag))
 	err := c.removeInbound(tag)
 	if err != nil {
 		return fmt.Errorf("remove in error: %s", err)

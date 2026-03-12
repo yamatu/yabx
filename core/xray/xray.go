@@ -46,6 +46,7 @@ func parseConnectionConfig(c *conf.XrayConnectionConfig) (policy *coreConf.Polic
 	policy = &coreConf.Policy{
 		StatsUserUplink:   true,
 		StatsUserDownlink: true,
+		StatsUserOnline:   true,
 		Handshake:         &c.Handshake,
 		ConnectionIdle:    &c.ConnIdle,
 		UplinkOnly:        &c.UplinkOnly,

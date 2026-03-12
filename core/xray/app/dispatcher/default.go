@@ -122,6 +122,14 @@ func sourceIPString(inbound *session.Inbound) string {
 	return inbound.Source.Address.String()
 }
 
+func userOnlineStatName(email string) string {
+	return "user>>>" + email + ">>>online"
+}
+
+func inboundOnlineStatName(tag string) string {
+	return "inbound>>>" + tag + ">>>online"
+}
+
 // DefaultDispatcher is a default implementation of Dispatcher.
 type DefaultDispatcher struct {
 	ohm    outbound.Manager
@@ -169,6 +177,29 @@ func (*DefaultDispatcher) Start() error {
 
 // Close implements common.Closable.
 func (*DefaultDispatcher) Close() error { return nil }
+
+func (d *DefaultDispatcher) recordOnlineStats(ctx context.Context, sessionInbound *session.Inbound, user *protocol.MemoryUser, enableUserOnline bool) {
+	if d.stats == nil || sessionInbound == nil || user == nil {
+		return
+	}
+
+	userIP := sourceIPString(sessionInbound)
+	if userIP == "" {
+		return
+	}
+
+	if enableUserOnline {
+		if om, _ := stats.GetOrRegisterOnlineMap(d.stats, userOnlineStatName(user.Email)); om != nil {
+			om.AddIP(userIP)
+		}
+	}
+
+	if sessionInbound.Tag != "" {
+		if om, _ := stats.GetOrRegisterOnlineMap(d.stats, inboundOnlineStatName(sessionInbound.Tag)); om != nil {
+			om.AddIP(userIP)
+		}
+	}
+}
 
 func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*transport.Link, *transport.Link, *limiter.Limiter, error) {
 	opt := pipe.OptionsFromContext(ctx)
@@ -240,6 +271,7 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 				}
 			}
 		}
+		d.recordOnlineStats(ctx, sessionInbound, user, p.Stats.UserOnline)
 	}
 
 	return inboundLink, outboundLink, limit, nil
@@ -305,6 +337,7 @@ func (d *DefaultDispatcher) wrapLink(ctx context.Context, link *transport.Link, 
 			}
 		}
 	}
+	d.recordOnlineStats(ctx, sessionInbound, user, p.Stats.UserOnline)
 
 	return link, limit, nil
 }

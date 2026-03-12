@@ -26,7 +26,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		}
 	}
 
-	onlineDevice, err := c.limiter.GetOnlineDevice()
+	onlineDevice, err := c.getOnlineUsers()
 	if err != nil {
 		log.WithFields(log.Fields{
 			"tag": c.tag,
@@ -36,7 +36,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		// Only report users whose period traffic reaches DeviceOnlineMinTraffic.
 		// Keep traffic filter behavior for ppanel only.
 		// XBoard/UniProxy expects real-time online device reporting even with tiny traffic.
-		result := make([]panel.OnlineUser, 0, len(*onlineDevice))
+		result := make([]panel.OnlineUser, 0, len(onlineDevice))
 		nocountUID := make(map[int]struct{})
 		applyTrafficFilter := c.apiClient.PanelType == "ppanel" && c.Options.DeviceOnlineMinTraffic > 0
 		if applyTrafficFilter {
@@ -47,7 +47,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 				}
 			}
 		}
-		for _, online := range *onlineDevice {
+		for _, online := range onlineDevice {
 			if _, ok := nocountUID[online.UID]; !ok {
 				result = append(result, online)
 			}
@@ -86,7 +86,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 				"err": err,
 			}).Info("Report online users failed")
 		} else {
-			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", len(*onlineDevice), len(result))
+			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", len(onlineDevice), len(result))
 		}
 	}
 
@@ -145,7 +145,7 @@ func (c *Controller) syncOnlineUsersTask() error {
 		return nil
 	}
 
-	data, err := c.limiter.GetOnlineIPMap()
+	data, err := c.getOnlineIPMap()
 	if err != nil {
 		log.WithFields(log.Fields{
 			"tag": c.tag,
