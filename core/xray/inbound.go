@@ -175,6 +175,10 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 func buildV2ray(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
 	v := nodeInfo.VAllss
 	if nodeInfo.Type == "vless" {
+		decryption := strings.TrimSpace(v.Decryption)
+		if decryption == "" {
+			decryption = "none"
+		}
 		//Set vless
 		inbound.Protocol = "vless"
 		if config.XrayOptions.EnableFallback {
@@ -184,7 +188,7 @@ func buildV2ray(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreCon
 				return err
 			}
 			s, err := json.Marshal(&coreConf.VLessInboundConfig{
-				Decryption: "none",
+				Decryption: decryption,
 				Fallbacks:  fallbackConfigs,
 			})
 			if err != nil {
@@ -194,7 +198,7 @@ func buildV2ray(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreCon
 		} else {
 			var err error
 			s, err := json.Marshal(&coreConf.VLessInboundConfig{
-				Decryption: "none",
+				Decryption: decryption,
 			})
 			if err != nil {
 				return fmt.Errorf("marshal vless config error: %s", err)

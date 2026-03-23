@@ -80,6 +80,8 @@ type VAllssNode struct {
 	ServerName          string          `json:"server_name"`
 
 	// vless only
+	Encryption   string        `json:"encryption"`
+	Decryption   string        `json:"decryption"`
 	Flow          string        `json:"flow"`
 	RealityConfig RealityConfig `json:"-"`
 }

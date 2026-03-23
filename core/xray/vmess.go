@@ -29,17 +29,18 @@ func buildVmessUser(tag string, userInfo *panel.UserInfo) (user *protocol.User) 
 	}
 }
 
-func buildVlessUsers(tag string, userInfo []panel.UserInfo, flow string) (users []*protocol.User) {
+func buildVlessUsers(tag string, userInfo []panel.UserInfo, flow string, encryption string) (users []*protocol.User) {
 	users = make([]*protocol.User, len(userInfo))
 	for i := range userInfo {
-		users[i] = buildVlessUser(tag, &(userInfo)[i], flow)
+		users[i] = buildVlessUser(tag, &(userInfo)[i], flow, encryption)
 	}
 	return users
 }
 
-func buildVlessUser(tag string, userInfo *panel.UserInfo, flow string) (user *protocol.User) {
+func buildVlessUser(tag string, userInfo *panel.UserInfo, flow string, encryption string) (user *protocol.User) {
 	vlessAccount := &vless.Account{
-		Id: userInfo.Uuid,
+		Id:         userInfo.Uuid,
+		Encryption: encryption,
 	}
 	vlessAccount.Flow = flow
 	return &protocol.User{
