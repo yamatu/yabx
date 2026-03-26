@@ -3,10 +3,10 @@ package xray
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/format"
+	"github.com/InazumaV/V2bX/common/netutil"
 )
 
 const onlineStatSuffix = ">>>online"
@@ -17,10 +17,6 @@ func userOnlineStatName(tag, uuid string) string {
 
 func inboundOnlineStatName(tag string) string {
 	return "inbound>>>" + tag + onlineStatSuffix
-}
-
-func normalizeOnlineIP(ip string) string {
-	return strings.TrimPrefix(ip, "::ffff:")
 }
 
 func (c *Xray) GetOnlineUsers(tag string, users []panel.UserInfo) ([]panel.OnlineUser, error) {
@@ -37,7 +33,7 @@ func (c *Xray) GetOnlineUsers(tag string, users []panel.UserInfo) ([]panel.Onlin
 
 		seen := make(map[string]struct{})
 		for _, ip := range onlineMap.List() {
-			ip = normalizeOnlineIP(ip)
+			ip = netutil.NormalizeIP(ip)
 			if ip == "" {
 				continue
 			}

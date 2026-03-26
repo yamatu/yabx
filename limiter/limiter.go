@@ -3,12 +3,12 @@ package limiter
 import (
 	"errors"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/format"
+	"github.com/InazumaV/V2bX/common/netutil"
 	"github.com/InazumaV/V2bX/conf"
 	"github.com/juju/ratelimit"
 	log "github.com/sirupsen/logrus"
@@ -174,8 +174,7 @@ func (l *Limiter) GetAlive(uid int) int {
 }
 
 func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool) (Bucket *ratelimit.Bucket, Reject bool) {
-	// check if ipv4 mapped ipv6
-	ip = strings.TrimPrefix(ip, "::ffff:")
+	ip = netutil.NormalizeIP(ip)
 
 	// ip and conn limiter
 	if l.ConnLimiter.AddConnCount(taguuid, ip, isTcp) {
@@ -279,7 +278,11 @@ func (l *Limiter) snapshotOnlineUsers() []panel.OnlineUser {
 		}
 		ipMap.Range(func(key, _ interface{}) bool {
 			ip, ok := key.(string)
-			if !ok || ip == "" {
+			if !ok {
+				return true
+			}
+			ip = netutil.NormalizeIP(ip)
+			if ip == "" {
 				return true
 			}
 			k := onlineKey{uid: uid, ip: ip}
@@ -305,7 +308,10 @@ func (l *Limiter) GetOnlineDevice() (*[]panel.OnlineUser, error) {
 		ipMap := value.(*sync.Map)
 		ipMap.Range(func(key, value interface{}) bool {
 			uid := value.(int)
-			ip := key.(string)
+			ip := netutil.NormalizeIP(key.(string))
+			if ip == "" {
+				return true
+			}
 			l.OldUserOnline.Store(ip, uid)
 			return true
 		})

@@ -1,6 +1,8 @@
 package limiter
 
 import (
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -72,23 +74,55 @@ func TestLimiterOnlineIPSnapshotAndAliveList(t *testing.T) {
 	if limited := l.ConnLimiter.AddConnCount(taguuid, "1.1.1.1", true); limited {
 		t.Fatal("unexpected limit on first connection")
 	}
-	if limited := l.ConnLimiter.AddConnCount(taguuid, "2.2.2.2", true); limited {
-		t.Fatal("unexpected limit on second connection")
+	if limited := l.ConnLimiter.AddConnCount(taguuid, "::ffff:1.1.1.1", true); limited {
+		t.Fatal("unexpected limit on duplicate normalized connection")
 	}
 
 	onlineMap, err := l.GetOnlineIPMap()
 	if err != nil {
 		t.Fatalf("GetOnlineIPMap failed: %v", err)
 	}
-	if len(onlineMap[1]) != 2 {
-		t.Fatalf("expected 2 online IPs, got %v", onlineMap[1])
+	if len(onlineMap[1]) != 1 {
+		t.Fatalf("expected 1 normalized online IP, got %v", onlineMap[1])
 	}
 
 	onlineUsers, err := l.GetOnlineDevice()
 	if err != nil {
 		t.Fatalf("GetOnlineDevice failed: %v", err)
 	}
-	if len(*onlineUsers) != 2 {
-		t.Fatalf("expected 2 online users, got %d", len(*onlineUsers))
+	if len(*onlineUsers) != 1 {
+		t.Fatalf("expected 1 normalized online user, got %d", len(*onlineUsers))
+	}
+	if got := (*onlineUsers)[0].IP; got != "1.1.1.1" {
+		t.Fatalf("expected normalized IP 1.1.1.1, got %s", got)
+	}
+}
+
+func TestLimiterGetOnlineIPMapReturnsSortedNormalizedIPs(t *testing.T) {
+	tag := "test-node"
+	uuid := "user-1"
+	taguuid := format.UserTag(tag, uuid)
+
+	l := AddLimiter(tag, &conf.LimitConfig{}, []panel.UserInfo{{
+		Id:   1,
+		Uuid: uuid,
+	}}, nil)
+
+	for _, ip := range []string{"2.2.2.2", "::ffff:1.1.1.1", "1.1.1.1"} {
+		if limited := l.ConnLimiter.AddConnCount(taguuid, ip, true); limited {
+			t.Fatalf("unexpected limit for ip %s", ip)
+		}
+	}
+
+	onlineMap, err := l.GetOnlineIPMap()
+	if err != nil {
+		t.Fatalf("GetOnlineIPMap failed: %v", err)
+	}
+
+	got := append([]string(nil), onlineMap[1]...)
+	sort.Strings(got)
+	want := []string{"1.1.1.1", "2.2.2.2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected online map: got=%v want=%v", got, want)
 	}
 }

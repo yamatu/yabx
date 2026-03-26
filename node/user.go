@@ -52,11 +52,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 				result = append(result, online)
 			}
 		}
-		data := make(map[int][]string)
-		for _, onlineuser := range result {
-			// json structure: { UID1:["ip1","ip2"],UID2:["ip3","ip4"] }
-			data[onlineuser.UID] = append(data[onlineuser.UID], onlineuser.IP)
-		}
+		data := buildOnlineIPPayload(result, c.userList)
 
 		// XBoard node online count is based on /push payload count.
 		// Include zero-traffic online users for non-ppanel to keep node online count aligned with online users.
@@ -144,6 +140,8 @@ func (c *Controller) syncOnlineUsersTask() error {
 		return nil
 	}
 
+	data = buildOnlineIPMapPayload(data, c.userList)
+
 	if err = c.apiClient.ReportNodeOnlineUsers(&data); err != nil {
 		log.WithFields(log.Fields{
 			"tag": c.tag,
@@ -190,4 +188,24 @@ func compareUserList(old, new []panel.UserInfo) (deleted, added []panel.UserInfo
 	}
 
 	return deleted, added
+}
+
+func buildOnlineIPPayload(onlineUsers []panel.OnlineUser, users []panel.UserInfo) map[int][]string {
+	data := make(map[int][]string, len(users))
+	for _, onlineuser := range onlineUsers {
+		data[onlineuser.UID] = append(data[onlineuser.UID], onlineuser.IP)
+	}
+	return buildOnlineIPMapPayload(data, users)
+}
+
+func buildOnlineIPMapPayload(data map[int][]string, users []panel.UserInfo) map[int][]string {
+	if data == nil {
+		data = make(map[int][]string, len(users))
+	}
+	for _, user := range users {
+		if _, ok := data[user.Id]; !ok {
+			data[user.Id] = []string{}
+		}
+	}
+	return data
 }
