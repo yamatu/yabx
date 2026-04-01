@@ -134,6 +134,7 @@ func (c *Controller) syncOnlineUsersTask() error {
 	}
 
 	data, err := c.getOnlineIPMap()
+	data = dedupeOnlineIPMapByIP(data)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"tag": c.tag,
