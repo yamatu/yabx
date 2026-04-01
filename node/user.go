@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/serverstatus"
@@ -33,6 +34,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 			"err": err,
 		}).Info("Get online users failed")
 	} else {
+		onlineDevice = dedupeOnlineUsersByIP(onlineDevice)
 		// Only report users whose period traffic reaches DeviceOnlineMinTraffic.
 		// Keep traffic filter behavior for ppanel only.
 		// XBoard/UniProxy expects real-time online device reporting even with tiny traffic.
@@ -140,6 +142,7 @@ func (c *Controller) syncOnlineUsersTask() error {
 		return nil
 	}
 
+	data = dedupeOnlineIPMapByIP(data)
 	data = buildOnlineIPMapPayload(data, c.userList)
 
 	if err = c.apiClient.ReportNodeOnlineUsers(&data); err != nil {
@@ -161,6 +164,61 @@ func (c *Controller) syncOnlineUsersTask() error {
 	c.aliveMap = aliveMap
 	c.limiter.SetAliveList(aliveMap)
 	return nil
+}
+
+func dedupeOnlineUsersByIP(users []panel.OnlineUser) []panel.OnlineUser {
+	if len(users) <= 1 {
+		return users
+	}
+
+	seen := make(map[string]struct{}, len(users))
+	result := make([]panel.OnlineUser, 0, len(users))
+	for _, onlineUser := range users {
+		if onlineUser.IP == "" {
+			continue
+		}
+		if _, ok := seen[onlineUser.IP]; ok {
+			continue
+		}
+		seen[onlineUser.IP] = struct{}{}
+		result = append(result, onlineUser)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IP != result[j].IP {
+			return result[i].IP < result[j].IP
+		}
+		return result[i].UID < result[j].UID
+	})
+	return result
+}
+
+func dedupeOnlineIPMapByIP(data map[int][]string) map[int][]string {
+	if len(data) <= 1 {
+		return data
+	}
+
+	uids := make([]int, 0, len(data))
+	for uid := range data {
+		uids = append(uids, uid)
+	}
+	sort.Ints(uids)
+
+	seen := make(map[string]struct{})
+	result := make(map[int][]string, len(data))
+	for _, uid := range uids {
+		for _, ip := range data[uid] {
+			if ip == "" {
+				continue
+			}
+			if _, ok := seen[ip]; ok {
+				continue
+			}
+			seen[ip] = struct{}{}
+			result[uid] = append(result[uid], ip)
+		}
+	}
+	return result
 }
 
 func userCompareKey(user panel.UserInfo) string {
