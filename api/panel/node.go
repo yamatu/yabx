@@ -86,6 +86,27 @@ type VAllssNode struct {
 	RealityConfig RealityConfig `json:"-"`
 }
 
+func (v *VAllssNode) NormalizedEncryption() string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(v.Encryption)
+}
+
+func (v *VAllssNode) NormalizedDecryption() string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(v.Decryption)
+}
+
+func (v *VAllssNode) HasVlessEncryption() bool {
+	if v == nil {
+		return false
+	}
+	return v.NormalizedEncryption() != "" && v.NormalizedDecryption() != ""
+}
+
 type TlsSettings struct {
 	ServerName string `json:"server_name"`
 	Dest       string `json:"dest"`

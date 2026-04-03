@@ -175,7 +175,10 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 func buildV2ray(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
 	v := nodeInfo.VAllss
 	if nodeInfo.Type == "vless" {
-		decryption := strings.TrimSpace(v.Decryption)
+		decryption := "none"
+		if v.HasVlessEncryption() {
+			decryption = v.NormalizedDecryption()
+		}
 		if decryption == "" {
 			decryption = "none"
 		}

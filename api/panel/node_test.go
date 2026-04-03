@@ -67,3 +67,50 @@ func TestVlessNodeConfig_UnmarshalEncryptionFields(t *testing.T) {
 		t.Fatalf("unexpected decryption: %q", node.VAllss.Decryption)
 	}
 }
+
+func TestVlessEncryptionRequiresBothSides(t *testing.T) {
+	tests := []struct {
+		name       string
+		encryption string
+		decryption string
+		enabled    bool
+	}{
+		{
+			name:       "both present",
+			encryption: "public-key",
+			decryption: "private-key",
+			enabled:    true,
+		},
+		{
+			name:       "missing encryption",
+			encryption: "",
+			decryption: "private-key",
+			enabled:    false,
+		},
+		{
+			name:       "missing decryption",
+			encryption: "public-key",
+			decryption: "",
+			enabled:    false,
+		},
+		{
+			name:       "blank values",
+			encryption: "  ",
+			decryption: "\t",
+			enabled:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := &VAllssNode{
+				Encryption: tt.encryption,
+				Decryption: tt.decryption,
+			}
+
+			if got := node.HasVlessEncryption(); got != tt.enabled {
+				t.Fatalf("HasVlessEncryption() = %v, want %v", got, tt.enabled)
+			}
+		})
+	}
+}
