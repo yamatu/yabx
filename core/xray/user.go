@@ -77,10 +77,7 @@ func (c *Xray) AddUsers(p *vCore.AddUsersParams) (added int, err error) {
 	case "vmess":
 		users = buildVmessUsers(p.Tag, p.Users)
 	case "vless":
-		encryption := ""
-		if p.VAllss.HasVlessEncryption() {
-			encryption = p.VAllss.NormalizedEncryption()
-		}
+		encryption := resolveVlessOutboundEncryption(p.VAllss)
 		users = buildVlessUsers(p.Tag, p.Users, p.VAllss.Flow, encryption)
 	case "trojan":
 		users = buildTrojanUsers(p.Tag, p.Users)

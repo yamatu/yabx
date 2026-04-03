@@ -44,3 +44,45 @@ func TestBuildVlessUserDisablesEncryptionWhenEmpty(t *testing.T) {
 		t.Fatalf("Encryption = %q, want empty", account.Encryption)
 	}
 }
+
+func TestResolveVlessInboundDecryptionWrapsRawX25519Key(t *testing.T) {
+	node := &panel.VAllssNode{
+		Encryption: "1N2wG4m8g8xv8cRXX8P8aNqL2vW4M2LwF7p0M8l8wSU",
+		Decryption: "CFYGW1MRvmQFdqqyncKo7cWcY3nUfH5HpOv3nR5ednQ",
+	}
+
+	got := resolveVlessInboundDecryption(node)
+	want := "mlkem768x25519plus.native.600s.CFYGW1MRvmQFdqqyncKo7cWcY3nUfH5HpOv3nR5ednQ"
+	if got != want {
+		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveVlessOutboundEncryptionWrapsRawX25519Key(t *testing.T) {
+	node := &panel.VAllssNode{
+		Encryption: "1N2wG4m8g8xv8cRXX8P8aNqL2vW4M2LwF7p0M8l8wSU",
+		Decryption: "CFYGW1MRvmQFdqqyncKo7cWcY3nUfH5HpOv3nR5ednQ",
+	}
+
+	got := resolveVlessOutboundEncryption(node)
+	want := "mlkem768x25519plus.native.0rtt.1N2wG4m8g8xv8cRXX8P8aNqL2vW4M2LwF7p0M8l8wSU"
+	if got != want {
+		t.Fatalf("resolveVlessOutboundEncryption() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveVlessEncryptionPreservesStructuredValue(t *testing.T) {
+	structuredEnc := "mlkem768x25519plus.native.0rtt.some-key"
+	structuredDec := "mlkem768x25519plus.native.600s.some-key"
+	node := &panel.VAllssNode{
+		Encryption: structuredEnc,
+		Decryption: structuredDec,
+	}
+
+	if got := resolveVlessOutboundEncryption(node); got != structuredEnc {
+		t.Fatalf("resolveVlessOutboundEncryption() = %q, want %q", got, structuredEnc)
+	}
+	if got := resolveVlessInboundDecryption(node); got != structuredDec {
+		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, structuredDec)
+	}
+}
