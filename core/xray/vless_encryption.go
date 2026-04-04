@@ -8,10 +8,12 @@ import (
 )
 
 const (
-	vlessEncryptionPrefix        = "mlkem768x25519plus."
-	vlessEncryptionInboundMode   = "mlkem768x25519plus.native.600s."
-	vlessEncryptionOutboundMode  = "mlkem768x25519plus.native.0rtt."
-	vlessEncryptionX25519KeySize = 32
+	vlessEncryptionPrefix             = "mlkem768x25519plus."
+	vlessEncryptionInboundMode        = "mlkem768x25519plus.native.600s."
+	vlessEncryptionOutboundMode       = "mlkem768x25519plus.native.0rtt."
+	vlessEncryptionX25519KeySize      = 32
+	vlessEncryptionMlkemSeedSize      = 64
+	vlessEncryptionMlkemCipherKeySize = 1184
 )
 
 func resolveVlessInboundDecryption(v *panel.VAllssNode) string {
@@ -25,11 +27,11 @@ func resolveVlessInboundDecryption(v *panel.VAllssNode) string {
 	}
 
 	if isStructuredVlessEncryptionValue(decryption) {
-		return "none"
+		return decryption
 	}
 
-	if isRawBase64URLKey(decryption, vlessEncryptionX25519KeySize) {
-		return "none"
+	if isRawBase64URLKey(decryption, vlessEncryptionX25519KeySize, vlessEncryptionMlkemSeedSize) {
+		return vlessEncryptionInboundMode + decryption
 	}
 
 	return decryption
@@ -49,7 +51,7 @@ func resolveVlessOutboundEncryption(v *panel.VAllssNode) string {
 		return encryption
 	}
 
-	if isRawBase64URLKey(encryption, vlessEncryptionX25519KeySize) {
+	if isRawBase64URLKey(encryption, vlessEncryptionX25519KeySize, vlessEncryptionMlkemCipherKeySize) {
 		return vlessEncryptionOutboundMode + encryption
 	}
 
@@ -60,7 +62,15 @@ func isStructuredVlessEncryptionValue(value string) bool {
 	return strings.HasPrefix(value, vlessEncryptionPrefix)
 }
 
-func isRawBase64URLKey(value string, expectedLen int) bool {
+func isRawBase64URLKey(value string, expectedLens ...int) bool {
 	decoded, err := base64.RawURLEncoding.DecodeString(value)
-	return err == nil && len(decoded) == expectedLen
+	if err != nil {
+		return false
+	}
+	for _, expectedLen := range expectedLens {
+		if len(decoded) == expectedLen {
+			return true
+		}
+	}
+	return false
 }

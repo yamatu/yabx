@@ -2,6 +2,7 @@ package xray
 
 import (
 	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -51,26 +52,66 @@ func TestBuildVlessUserDisablesEncryptionWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestResolveVlessInboundDecryptionFallsBackForRawX25519Key(t *testing.T) {
+func TestResolveVlessInboundDecryptionReturnsNoneWithoutCompletePair(t *testing.T) {
+	tests := []struct {
+		name string
+		node *panel.VAllssNode
+	}{
+		{name: "nil node", node: nil},
+		{name: "empty values", node: &panel.VAllssNode{}},
+		{name: "missing decryption", node: &panel.VAllssNode{Encryption: "mlkem768x25519plus.native.0rtt.some-key"}},
+		{name: "missing encryption", node: &panel.VAllssNode{Decryption: "mlkem768x25519plus.native.600s.some-key"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveVlessInboundDecryption(tt.node); got != "none" {
+				t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, "none")
+			}
+		})
+	}
+}
+
+func TestResolveVlessInboundDecryptionWrapsRawX25519Key(t *testing.T) {
+	rawEncryption := rawURLKeyOfSize(vlessEncryptionX25519KeySize)
+	rawDecryption := rawURLKeyOfSize(vlessEncryptionX25519KeySize)
 	node := &panel.VAllssNode{
-		Encryption: "1N2wG4m8g8xv8cRXX8P8aNqL2vW4M2LwF7p0M8l8wSU",
-		Decryption: "CFYGW1MRvmQFdqqyncKo7cWcY3nUfH5HpOv3nR5ednQ",
+		Encryption: rawEncryption,
+		Decryption: rawDecryption,
 	}
 
 	got := resolveVlessInboundDecryption(node)
-	if got != "none" {
-		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, "none")
+	want := vlessEncryptionInboundMode + rawDecryption
+	if got != want {
+		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveVlessInboundDecryptionWrapsRawMlkemSeed(t *testing.T) {
+	rawEncryption := rawURLKeyOfSize(vlessEncryptionMlkemCipherKeySize)
+	rawDecryption := rawURLKeyOfSize(vlessEncryptionMlkemSeedSize)
+	node := &panel.VAllssNode{
+		Encryption: rawEncryption,
+		Decryption: rawDecryption,
+	}
+
+	got := resolveVlessInboundDecryption(node)
+	want := vlessEncryptionInboundMode + rawDecryption
+	if got != want {
+		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, want)
 	}
 }
 
 func TestResolveVlessOutboundEncryptionWrapsRawX25519Key(t *testing.T) {
+	rawEncryption := rawURLKeyOfSize(vlessEncryptionX25519KeySize)
+	rawDecryption := rawURLKeyOfSize(vlessEncryptionX25519KeySize)
 	node := &panel.VAllssNode{
-		Encryption: "1N2wG4m8g8xv8cRXX8P8aNqL2vW4M2LwF7p0M8l8wSU",
-		Decryption: "CFYGW1MRvmQFdqqyncKo7cWcY3nUfH5HpOv3nR5ednQ",
+		Encryption: rawEncryption,
+		Decryption: rawDecryption,
 	}
 
 	got := resolveVlessOutboundEncryption(node)
-	want := "mlkem768x25519plus.native.0rtt.1N2wG4m8g8xv8cRXX8P8aNqL2vW4M2LwF7p0M8l8wSU"
+	want := vlessEncryptionOutboundMode + rawEncryption
 	if got != want {
 		t.Fatalf("resolveVlessOutboundEncryption() = %q, want %q", got, want)
 	}
@@ -87,15 +128,19 @@ func TestResolveVlessEncryptionPreservesStructuredValue(t *testing.T) {
 	if got := resolveVlessOutboundEncryption(node); got != structuredEnc {
 		t.Fatalf("resolveVlessOutboundEncryption() = %q, want %q", got, structuredEnc)
 	}
-	if got := resolveVlessInboundDecryption(node); got != "none" {
-		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, "none")
+	if got := resolveVlessInboundDecryption(node); got != structuredDec {
+		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, structuredDec)
 	}
 }
 
-func TestBuildV2rayVlessInboundUsesNoneForStructuredDecryption(t *testing.T) {
+func TestBuildV2rayVlessInboundPreservesStructuredDecryption(t *testing.T) {
+	structuredDec := "mlkem768x25519plus.native.600s.some-key"
 	nodeInfo := &panel.NodeInfo{
-		Type:   "vless",
-		VAllss: &panel.VAllssNode{Encryption: "mlkem768x25519plus.native.0rtt.some-key", Decryption: "mlkem768x25519plus.native.600s.some-key"},
+		Type: "vless",
+		VAllss: &panel.VAllssNode{
+			Encryption: "mlkem768x25519plus.native.0rtt.some-key",
+			Decryption: structuredDec,
+		},
 	}
 	inbound := &coreConf.InboundDetourConfig{}
 	options := &conf2.Options{XrayOptions: conf2.NewXrayOptions()}
@@ -106,8 +151,32 @@ func TestBuildV2rayVlessInboundUsesNoneForStructuredDecryption(t *testing.T) {
 	if inbound.Settings == nil {
 		t.Fatal("buildV2ray() produced nil settings")
 	}
-	if strings.Contains(string(*inbound.Settings), "mlkem768x25519plus.native.600s") {
-		t.Fatalf("buildV2ray() settings unexpectedly contain inbound structured decryption: %s", string(*inbound.Settings))
+	if !strings.Contains(string(*inbound.Settings), structuredDec) {
+		t.Fatalf("buildV2ray() settings do not contain inbound structured decryption: %s", string(*inbound.Settings))
+	}
+
+	var cfg coreConf.VLessInboundConfig
+	if err := json.Unmarshal(*inbound.Settings, &cfg); err != nil {
+		t.Fatalf("unmarshal inbound settings error = %v", err)
+	}
+	if cfg.Decryption != structuredDec {
+		t.Fatalf("VLessInboundConfig.Decryption = %q, want %q", cfg.Decryption, structuredDec)
+	}
+}
+
+func TestBuildV2rayVlessInboundUsesNoneWhenEncryptionDisabled(t *testing.T) {
+	nodeInfo := &panel.NodeInfo{
+		Type:   "vless",
+		VAllss: &panel.VAllssNode{},
+	}
+	inbound := &coreConf.InboundDetourConfig{}
+	options := &conf2.Options{XrayOptions: conf2.NewXrayOptions()}
+
+	if err := buildV2ray(options, nodeInfo, inbound); err != nil {
+		t.Fatalf("buildV2ray() error = %v", err)
+	}
+	if inbound.Settings == nil {
+		t.Fatal("buildV2ray() produced nil settings")
 	}
 
 	var cfg coreConf.VLessInboundConfig
@@ -163,4 +232,8 @@ func TestValidateRouteOutboundReferencesWarnsForMissingTag(t *testing.T) {
 	if !strings.Contains(logged, "OutboundConfigPath") {
 		t.Fatalf("validateRouteOutboundReferences() log = %q, want OutboundConfigPath hint", logged)
 	}
+}
+
+func rawURLKeyOfSize(size int) string {
+	return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, size))
 }
