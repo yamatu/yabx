@@ -8,10 +8,10 @@ import (
 )
 
 const (
-	vlessEncryptionPrefix           = "mlkem768x25519plus."
-	vlessEncryptionInboundMode      = "mlkem768x25519plus.native.600s."
-	vlessEncryptionOutboundMode     = "mlkem768x25519plus.native.0rtt."
-	vlessEncryptionX25519KeySize    = 32
+	vlessEncryptionPrefix        = "mlkem768x25519plus."
+	vlessEncryptionInboundMode   = "mlkem768x25519plus.native.600s."
+	vlessEncryptionOutboundMode  = "mlkem768x25519plus.native.0rtt."
+	vlessEncryptionX25519KeySize = 32
 )
 
 func resolveVlessInboundDecryption(v *panel.VAllssNode) string {
@@ -25,11 +25,11 @@ func resolveVlessInboundDecryption(v *panel.VAllssNode) string {
 	}
 
 	if isStructuredVlessEncryptionValue(decryption) {
-		return decryption
+		return "none"
 	}
 
 	if isRawBase64URLKey(decryption, vlessEncryptionX25519KeySize) {
-		return vlessEncryptionInboundMode + decryption
+		return "none"
 	}
 
 	return decryption

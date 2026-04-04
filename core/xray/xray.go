@@ -3,6 +3,8 @@ package xray
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/InazumaV/V2bX/conf"
@@ -12,6 +14,7 @@ import (
 	"github.com/goccy/go-json"
 	log "github.com/sirupsen/logrus"
 	"github.com/xtls/xray-core/app/proxyman"
+	"github.com/xtls/xray-core/app/router"
 	"github.com/xtls/xray-core/app/stats"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/core"
@@ -140,6 +143,7 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 		}
 		outBoundConfig = append(outBoundConfig, oc)
 	}
+	validateRouteOutboundReferences(c.RouteConfigPath, coreRouterConfig, c.OutboundConfigPath, coreCustomOutboundConfig)
 	// Policy config
 	levelPolicyConfig := parseConnectionConfig(c.ConnectionConfig)
 	corePolicyConfig := &coreConf.PolicyConfig{}
@@ -208,4 +212,92 @@ func (c *Xray) Protocols() []string {
 
 func (c *Xray) Type() string {
 	return "xray"
+}
+
+func validateRouteOutboundReferences(routeConfigPath string, routeConfig *coreConf.RouterConfig, outboundConfigPath string, outboundConfigs []coreConf.OutboundDetourConfig) {
+	if routeConfig == nil || len(routeConfig.RuleList) == 0 {
+		return
+	}
+
+	definedTags := collectConfiguredOutboundTags(outboundConfigs)
+	missingTags := collectMissingRouteOutboundTags(routeConfig.RuleList, definedTags)
+	if len(missingTags) == 0 {
+		return
+	}
+
+	tags := make([]string, 0, len(missingTags))
+	for tag := range missingTags {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+
+	routeSource := routeConfigPath
+	if strings.TrimSpace(routeSource) == "" {
+		routeSource = "RouteConfigPath"
+	}
+	outboundSource := outboundConfigPath
+	if strings.TrimSpace(outboundSource) == "" {
+		outboundSource = "OutboundConfigPath"
+	}
+
+	log.WithFields(log.Fields{
+		"routeConfigPath":     routeConfigPath,
+		"outboundConfigPath":  outboundConfigPath,
+		"missingOutboundTags": strings.Join(tags, ", "),
+	}).Warnf("Route config %s references outbound tag(s) [%s] that are not loaded. Load matching outbound definitions via %s or remove those route rules to avoid repeated 'non existing outTag' warnings.", routeSource, strings.Join(tags, ", "), outboundSource)
+}
+
+func collectConfiguredOutboundTags(outboundConfigs []coreConf.OutboundDetourConfig) map[string]struct{} {
+	tags := make(map[string]struct{}, len(outboundConfigs))
+	for _, config := range outboundConfigs {
+		tag := strings.TrimSpace(config.Tag)
+		if tag == "" {
+			continue
+		}
+		tags[tag] = struct{}{}
+	}
+	return tags
+}
+
+func collectMissingRouteOutboundTags(ruleList []json.RawMessage, definedTags map[string]struct{}) map[string]struct{} {
+	missing := make(map[string]struct{})
+	for _, rawRule := range ruleList {
+		var rule struct {
+			OutboundTag string `json:"outboundTag"`
+		}
+		if err := json.Unmarshal(rawRule, &rule); err != nil {
+			continue
+		}
+		tag := strings.TrimSpace(rule.OutboundTag)
+		if tag == "" {
+			continue
+		}
+		if _, ok := definedTags[tag]; ok {
+			continue
+		}
+		missing[tag] = struct{}{}
+	}
+	return missing
+}
+
+func collectRouteOutboundTags(routeConfig *router.Config) []string {
+	if routeConfig == nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	tags := make([]string, 0, len(routeConfig.Rule))
+	for _, rule := range routeConfig.Rule {
+		tag := strings.TrimSpace(rule.GetTag())
+		if tag == "" {
+			continue
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags
 }
