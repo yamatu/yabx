@@ -7,19 +7,35 @@ import (
 	"github.com/InazumaV/V2bX/api/panel"
 )
 
-func TestBuildOnlineIPPayloadIncludesOfflineUsers(t *testing.T) {
+func TestBuildOnlineIPPayloadOnlyIncludesOnlineUsers(t *testing.T) {
 	payload := buildOnlineIPPayload(
 		[]panel.OnlineUser{{UID: 2, IP: "2.2.2.2"}},
 		[]panel.UserInfo{{Id: 1}, {Id: 2}, {Id: 3}},
 	)
 
 	want := map[int][]string{
-		1: {},
 		2: {"2.2.2.2"},
-		3: {},
 	}
 	if !reflect.DeepEqual(payload, want) {
 		t.Fatalf("buildOnlineIPPayload() = %#v, want %#v", payload, want)
+	}
+}
+
+func TestBuildOnlineIPMapPayloadSkipsOfflineUsers(t *testing.T) {
+	payload := buildOnlineIPMapPayload(
+		map[int][]string{
+			1: {},
+			2: {"2.2.2.2"},
+			3: nil,
+		},
+		[]panel.UserInfo{{Id: 1}, {Id: 2}, {Id: 3}},
+	)
+
+	want := map[int][]string{
+		2: {"2.2.2.2"},
+	}
+	if !reflect.DeepEqual(payload, want) {
+		t.Fatalf("buildOnlineIPMapPayload() = %#v, want %#v", payload, want)
 	}
 }
 

@@ -249,22 +249,28 @@ func compareUserList(old, new []panel.UserInfo) (deleted, added []panel.UserInfo
 	return deleted, added
 }
 
-func buildOnlineIPPayload(onlineUsers []panel.OnlineUser, users []panel.UserInfo) map[int][]string {
-	data := make(map[int][]string, len(users))
+func buildOnlineIPPayload(onlineUsers []panel.OnlineUser, _ []panel.UserInfo) map[int][]string {
+	data := make(map[int][]string, len(onlineUsers))
 	for _, onlineuser := range onlineUsers {
+		if onlineuser.IP == "" {
+			continue
+		}
 		data[onlineuser.UID] = append(data[onlineuser.UID], onlineuser.IP)
 	}
-	return buildOnlineIPMapPayload(data, users)
+	return buildOnlineIPMapPayload(data, nil)
 }
 
-func buildOnlineIPMapPayload(data map[int][]string, users []panel.UserInfo) map[int][]string {
+func buildOnlineIPMapPayload(data map[int][]string, _ []panel.UserInfo) map[int][]string {
 	if data == nil {
-		data = make(map[int][]string, len(users))
+		return map[int][]string{}
 	}
-	for _, user := range users {
-		if _, ok := data[user.Id]; !ok {
-			data[user.Id] = []string{}
+
+	payload := make(map[int][]string, len(data))
+	for uid, ips := range data {
+		if len(ips) == 0 {
+			continue
 		}
+		payload[uid] = ips
 	}
-	return data
+	return payload
 }
