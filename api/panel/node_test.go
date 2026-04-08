@@ -114,3 +114,25 @@ func TestVlessEncryptionRequiresBothSides(t *testing.T) {
 		})
 	}
 }
+
+func TestTlsSettingsUnmarshalServerPortString(t *testing.T) {
+	var settings TlsSettings
+	if err := json.Unmarshal([]byte(`{"server_name":"example.com","server_port":"443"}`), &settings); err != nil {
+		t.Fatalf("unmarshal tls settings failed: %v", err)
+	}
+
+	if settings.ServerPort != "443" {
+		t.Fatalf("ServerPort = %q, want %q", settings.ServerPort, "443")
+	}
+}
+
+func TestTlsSettingsUnmarshalServerPortNumber(t *testing.T) {
+	var settings TlsSettings
+	if err := json.Unmarshal([]byte(`{"server_name":"example.com","server_port":443}`), &settings); err != nil {
+		t.Fatalf("unmarshal tls settings failed: %v", err)
+	}
+
+	if settings.ServerPort != "443" {
+		t.Fatalf("ServerPort = %q, want %q", settings.ServerPort, "443")
+	}
+}

@@ -116,6 +116,63 @@ type TlsSettings struct {
 	Xver       uint64 `json:"xver,string"`
 }
 
+type tlsSettingsJSON struct {
+	ServerName string          `json:"server_name"`
+	Dest       string          `json:"dest"`
+	ServerPort json.RawMessage `json:"server_port"`
+	ShortId    string          `json:"short_id"`
+	PrivateKey string          `json:"private_key"`
+	Xver       uint64          `json:"xver,string"`
+}
+
+func (t *TlsSettings) UnmarshalJSON(data []byte) error {
+	var aux tlsSettingsJSON
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	serverPort, err := decodeStringOrNumber(aux.ServerPort)
+	if err != nil {
+		return fmt.Errorf("decode tls server_port error: %w", err)
+	}
+
+	t.ServerName = aux.ServerName
+	t.Dest = aux.Dest
+	t.ServerPort = serverPort
+	t.ShortId = aux.ShortId
+	t.PrivateKey = aux.PrivateKey
+	t.Xver = aux.Xver
+	return nil
+}
+
+func decodeStringOrNumber(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strings.TrimSpace(s), nil
+	}
+
+	var i int64
+	if err := json.Unmarshal(raw, &i); err == nil {
+		return strconv.FormatInt(i, 10), nil
+	}
+
+	var u uint64
+	if err := json.Unmarshal(raw, &u); err == nil {
+		return strconv.FormatUint(u, 10), nil
+	}
+
+	var f float64
+	if err := json.Unmarshal(raw, &f); err == nil {
+		return strconv.FormatFloat(f, 'f', -1, 64), nil
+	}
+
+	return "", fmt.Errorf("unsupported value: %s", string(raw))
+}
+
 type RealityConfig struct {
 	Xver         uint64 `json:"Xver"`
 	MinClientVer string `json:"MinClientVer"`
