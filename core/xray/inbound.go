@@ -111,6 +111,9 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 				},
 				RejectUnknownSNI: option.CertConfig.RejectUnknownSni,
 			}
+			if ech := getInboundECHSettings(nodeInfo); ech.Enabled && strings.TrimSpace(ech.ServerKeys) != "" {
+				in.StreamSetting.TLSSettings.ECHServerKeys = strings.TrimSpace(ech.ServerKeys)
+			}
 		}
 	case panel.Reality:
 		// Reality
@@ -252,6 +255,23 @@ func buildV2ray(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreCon
 		return errors.New("the network type is not vail")
 	}
 	return nil
+}
+
+func getInboundECHSettings(nodeInfo *panel.NodeInfo) panel.ECHSettings {
+	if nodeInfo == nil {
+		return panel.ECHSettings{}
+	}
+	switch nodeInfo.Type {
+	case "vmess", "vless":
+		if nodeInfo.VAllss != nil {
+			return nodeInfo.VAllss.TlsSettings.ECH
+		}
+	case "trojan":
+		if nodeInfo.Trojan != nil {
+			return nodeInfo.Trojan.TlsSettings.ECH
+		}
+	}
+	return panel.ECHSettings{}
 }
 
 func buildTrojan(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {

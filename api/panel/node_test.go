@@ -136,3 +136,32 @@ func TestTlsSettingsUnmarshalServerPortNumber(t *testing.T) {
 		t.Fatalf("ServerPort = %q, want %q", settings.ServerPort, "443")
 	}
 }
+
+func TestTlsSettingsUnmarshalECH(t *testing.T) {
+	var settings TlsSettings
+	raw := []byte(`{
+		"server_name":"example.com",
+		"server_port":443,
+		"ech":{
+			"enabled":true,
+			"config_list":"AAECAw==",
+			"force_query":"full",
+			"query_server_name":"public.example.com",
+			"server_keys":"BAUGBw=="
+		}
+	}`)
+
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatalf("unmarshal tls settings failed: %v", err)
+	}
+
+	if !settings.ECH.Enabled {
+		t.Fatal("ECH.Enabled = false, want true")
+	}
+	if settings.ECH.ConfigList != "AAECAw==" {
+		t.Fatalf("ECH.ConfigList = %q, want %q", settings.ECH.ConfigList, "AAECAw==")
+	}
+	if settings.ECH.ServerKeys != "BAUGBw==" {
+		t.Fatalf("ECH.ServerKeys = %q, want %q", settings.ECH.ServerKeys, "BAUGBw==")
+	}
+}

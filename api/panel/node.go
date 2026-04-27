@@ -80,8 +80,8 @@ type VAllssNode struct {
 	ServerName          string          `json:"server_name"`
 
 	// vless only
-	Encryption   string        `json:"encryption"`
-	Decryption   string        `json:"decryption"`
+	Encryption    string        `json:"encryption"`
+	Decryption    string        `json:"decryption"`
 	Flow          string        `json:"flow"`
 	RealityConfig RealityConfig `json:"-"`
 }
@@ -108,12 +108,22 @@ func (v *VAllssNode) HasVlessEncryption() bool {
 }
 
 type TlsSettings struct {
-	ServerName string `json:"server_name"`
-	Dest       string `json:"dest"`
-	ServerPort string `json:"server_port"`
-	ShortId    string `json:"short_id"`
-	PrivateKey string `json:"private_key"`
-	Xver       uint64 `json:"xver,string"`
+	ServerName string      `json:"server_name"`
+	Dest       string      `json:"dest"`
+	ServerPort string      `json:"server_port"`
+	ShortId    string      `json:"short_id"`
+	PrivateKey string      `json:"private_key"`
+	Xver       uint64      `json:"xver,string"`
+	ECH        ECHSettings `json:"ech"`
+}
+
+type ECHSettings struct {
+	Enabled         bool   `json:"enabled"`
+	Config          string `json:"config"`
+	ConfigList      string `json:"config_list"`
+	ForceQuery      string `json:"force_query"`
+	QueryServerName string `json:"query_server_name"`
+	ServerKeys      string `json:"server_keys"`
 }
 
 type tlsSettingsJSON struct {
@@ -123,6 +133,7 @@ type tlsSettingsJSON struct {
 	ShortId    string          `json:"short_id"`
 	PrivateKey string          `json:"private_key"`
 	Xver       uint64          `json:"xver,string"`
+	ECH        ECHSettings     `json:"ech"`
 }
 
 func (t *TlsSettings) UnmarshalJSON(data []byte) error {
@@ -142,6 +153,7 @@ func (t *TlsSettings) UnmarshalJSON(data []byte) error {
 	t.ShortId = aux.ShortId
 	t.PrivateKey = aux.PrivateKey
 	t.Xver = aux.Xver
+	t.ECH = aux.ECH
 	return nil
 }
 
@@ -188,8 +200,11 @@ type ShadowsocksNode struct {
 
 type TrojanNode struct {
 	CommonNode
-	Network         string          `json:"network"`
-	NetworkSettings json.RawMessage `json:"networkSettings"`
+	Network             string          `json:"network"`
+	NetworkSettings     json.RawMessage `json:"networkSettings"`
+	NetworkSettingsBack json.RawMessage `json:"network_settings"`
+	TlsSettings         TlsSettings     `json:"tls_settings"`
+	TlsSettingsBack     *TlsSettings    `json:"tlsSettings"`
 }
 
 type TuicNode struct {
@@ -339,6 +354,22 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 			}
 
 			switch node.Protocol {
+			case "vmess", "vless":
+				if node.VAllss.TlsSettingsBack != nil {
+					node.VAllss.TlsSettings = *node.VAllss.TlsSettingsBack
+					node.VAllss.TlsSettingsBack = nil
+				}
+				node.Security = node.VAllss.Tls
+			case "trojan":
+				if len(node.Trojan.NetworkSettingsBack) > 0 {
+					node.Trojan.NetworkSettings = node.Trojan.NetworkSettingsBack
+					node.Trojan.NetworkSettingsBack = nil
+				}
+				if node.Trojan.TlsSettingsBack != nil {
+					node.Trojan.TlsSettings = *node.Trojan.TlsSettingsBack
+					node.Trojan.TlsSettingsBack = nil
+				}
+				node.Security = Tls
 			case "anytls":
 				if node.AnyTLS.TlsSettingsBack != nil {
 					node.AnyTLS.TlsSettings = *node.AnyTLS.TlsSettingsBack
@@ -433,6 +464,14 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 				err = json.Unmarshal(r.Body(), rsp)
 				if err != nil {
 					return nil, fmt.Errorf("decode trojan params error: %s", err)
+				}
+				if len(rsp.NetworkSettingsBack) > 0 {
+					rsp.NetworkSettings = rsp.NetworkSettingsBack
+					rsp.NetworkSettingsBack = nil
+				}
+				if rsp.TlsSettingsBack != nil {
+					rsp.TlsSettings = *rsp.TlsSettingsBack
+					rsp.TlsSettingsBack = nil
 				}
 				cm = &rsp.CommonNode
 				node.Trojan = rsp
