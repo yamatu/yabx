@@ -147,6 +147,7 @@ func TestTlsSettingsUnmarshalECH(t *testing.T) {
 			"config_list":"AAECAw==",
 			"force_query":"full",
 			"query_server_name":"public.example.com",
+			"private_key":"BAUGBw==",
 			"server_keys":"BAUGBw=="
 		}
 	}`)
@@ -163,5 +164,8 @@ func TestTlsSettingsUnmarshalECH(t *testing.T) {
 	}
 	if settings.ECH.ServerKeys != "BAUGBw==" {
 		t.Fatalf("ECH.ServerKeys = %q, want %q", settings.ECH.ServerKeys, "BAUGBw==")
+	}
+	if settings.ECH.PrivateKey != "BAUGBw==" {
+		t.Fatalf("ECH.PrivateKey = %q, want %q", settings.ECH.PrivateKey, "BAUGBw==")
 	}
 }

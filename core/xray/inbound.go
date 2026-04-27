@@ -111,8 +111,8 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 				},
 				RejectUnknownSNI: option.CertConfig.RejectUnknownSni,
 			}
-			if ech := getInboundECHSettings(nodeInfo); ech.Enabled && strings.TrimSpace(ech.ServerKeys) != "" {
-				in.StreamSetting.TLSSettings.ECHServerKeys = strings.TrimSpace(ech.ServerKeys)
+			if echServerKeys := getInboundECHServerKeys(nodeInfo); echServerKeys != "" {
+				in.StreamSetting.TLSSettings.ECHServerKeys = echServerKeys
 			}
 		}
 	case panel.Reality:
@@ -272,6 +272,17 @@ func getInboundECHSettings(nodeInfo *panel.NodeInfo) panel.ECHSettings {
 		}
 	}
 	return panel.ECHSettings{}
+}
+
+func getInboundECHServerKeys(nodeInfo *panel.NodeInfo) string {
+	ech := getInboundECHSettings(nodeInfo)
+	if !ech.Enabled {
+		return ""
+	}
+	if serverKeys := strings.TrimSpace(ech.ServerKeys); serverKeys != "" {
+		return serverKeys
+	}
+	return strings.TrimSpace(ech.PrivateKey)
 }
 
 func buildTrojan(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {

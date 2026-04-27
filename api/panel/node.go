@@ -123,6 +123,7 @@ type ECHSettings struct {
 	ConfigList      string `json:"config_list"`
 	ForceQuery      string `json:"force_query"`
 	QueryServerName string `json:"query_server_name"`
+	PrivateKey      string `json:"private_key"`
 	ServerKeys      string `json:"server_keys"`
 }
 
