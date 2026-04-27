@@ -74,6 +74,7 @@ type VAllssNode struct {
 	Tls                 int             `json:"tls"`
 	TlsSettings         TlsSettings     `json:"tls_settings"`
 	TlsSettingsBack     *TlsSettings    `json:"tlsSettings"`
+	ECH                 ECHSettings     `json:"ech"`
 	Network             string          `json:"network"`
 	NetworkSettings     json.RawMessage `json:"network_settings"`
 	NetworkSettingsBack json.RawMessage `json:"networkSettings"`
@@ -125,6 +126,79 @@ type ECHSettings struct {
 	QueryServerName string `json:"query_server_name"`
 	PrivateKey      string `json:"private_key"`
 	ServerKeys      string `json:"server_keys"`
+}
+
+type echSettingsJSON struct {
+	Enabled            bool   `json:"enabled"`
+	Config             string `json:"config"`
+	ConfigList         string `json:"config_list"`
+	ConfigListCamel    string `json:"configList"`
+	ECHConfigList      string `json:"ech_config_list"`
+	ECHConfigListCamel string `json:"echConfigList"`
+	ForceQuery         string `json:"force_query"`
+	ForceQueryCamel    string `json:"forceQuery"`
+	ECHForceQuery      string `json:"ech_force_query"`
+	ECHForceQueryCamel string `json:"echForceQuery"`
+	QueryServerName    string `json:"query_server_name"`
+	QueryServerCamel   string `json:"queryServerName"`
+	ECHQueryServer     string `json:"ech_query_server_name"`
+	ECHQueryCamel      string `json:"echQueryServerName"`
+	PrivateKey         string `json:"private_key"`
+	PrivateKeyCamel    string `json:"privateKey"`
+	ECHPrivateKey      string `json:"ech_private_key"`
+	ECHPrivateKeyCamel string `json:"echPrivateKey"`
+	ServerKeys         string `json:"server_keys"`
+	ServerKeysCamel    string `json:"serverKeys"`
+	ECHServerKeys      string `json:"ech_server_keys"`
+	ECHServerKeysCamel string `json:"echServerKeys"`
+}
+
+func (e *ECHSettings) UnmarshalJSON(data []byte) error {
+	var aux echSettingsJSON
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	e.Enabled = aux.Enabled
+	e.Config = strings.TrimSpace(aux.Config)
+	e.ConfigList = firstTrimmedString(aux.ConfigList, aux.ConfigListCamel, aux.ECHConfigList, aux.ECHConfigListCamel)
+	e.ForceQuery = firstTrimmedString(aux.ForceQuery, aux.ForceQueryCamel, aux.ECHForceQuery, aux.ECHForceQueryCamel)
+	e.QueryServerName = firstTrimmedString(aux.QueryServerName, aux.QueryServerCamel, aux.ECHQueryServer, aux.ECHQueryCamel)
+	e.PrivateKey = firstTrimmedString(aux.PrivateKey, aux.PrivateKeyCamel, aux.ECHPrivateKey, aux.ECHPrivateKeyCamel)
+	e.ServerKeys = firstTrimmedString(aux.ServerKeys, aux.ServerKeysCamel, aux.ECHServerKeys, aux.ECHServerKeysCamel)
+	return nil
+}
+
+func firstTrimmedString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mergeECHSettings(primary, fallback ECHSettings) ECHSettings {
+	primary.Enabled = primary.Enabled || fallback.Enabled
+	if primary.Config == "" {
+		primary.Config = fallback.Config
+	}
+	if primary.ConfigList == "" {
+		primary.ConfigList = fallback.ConfigList
+	}
+	if primary.ForceQuery == "" {
+		primary.ForceQuery = fallback.ForceQuery
+	}
+	if primary.QueryServerName == "" {
+		primary.QueryServerName = fallback.QueryServerName
+	}
+	if primary.PrivateKey == "" {
+		primary.PrivateKey = fallback.PrivateKey
+	}
+	if primary.ServerKeys == "" {
+		primary.ServerKeys = fallback.ServerKeys
+	}
+	return primary
 }
 
 type tlsSettingsJSON struct {
@@ -206,6 +280,7 @@ type TrojanNode struct {
 	NetworkSettingsBack json.RawMessage `json:"network_settings"`
 	TlsSettings         TlsSettings     `json:"tls_settings"`
 	TlsSettingsBack     *TlsSettings    `json:"tlsSettings"`
+	ECH                 ECHSettings     `json:"ech"`
 }
 
 type TuicNode struct {
@@ -360,6 +435,7 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 					node.VAllss.TlsSettings = *node.VAllss.TlsSettingsBack
 					node.VAllss.TlsSettingsBack = nil
 				}
+				node.VAllss.TlsSettings.ECH = mergeECHSettings(node.VAllss.TlsSettings.ECH, node.VAllss.ECH)
 				node.Security = node.VAllss.Tls
 			case "trojan":
 				if len(node.Trojan.NetworkSettingsBack) > 0 {
@@ -370,6 +446,7 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 					node.Trojan.TlsSettings = *node.Trojan.TlsSettingsBack
 					node.Trojan.TlsSettingsBack = nil
 				}
+				node.Trojan.TlsSettings.ECH = mergeECHSettings(node.Trojan.TlsSettings.ECH, node.Trojan.ECH)
 				node.Security = Tls
 			case "anytls":
 				if node.AnyTLS.TlsSettingsBack != nil {
@@ -448,6 +525,7 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 					rsp.TlsSettings = *rsp.TlsSettingsBack
 					rsp.TlsSettingsBack = nil
 				}
+				rsp.TlsSettings.ECH = mergeECHSettings(rsp.TlsSettings.ECH, rsp.ECH)
 				cm = &rsp.CommonNode
 				node.VAllss = rsp
 				node.Security = node.VAllss.Tls
@@ -474,6 +552,7 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 					rsp.TlsSettings = *rsp.TlsSettingsBack
 					rsp.TlsSettingsBack = nil
 				}
+				rsp.TlsSettings.ECH = mergeECHSettings(rsp.TlsSettings.ECH, rsp.ECH)
 				cm = &rsp.CommonNode
 				node.Trojan = rsp
 				node.Security = Tls

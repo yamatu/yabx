@@ -169,3 +169,63 @@ func TestTlsSettingsUnmarshalECH(t *testing.T) {
 		t.Fatalf("ECH.PrivateKey = %q, want %q", settings.ECH.PrivateKey, "BAUGBw==")
 	}
 }
+
+func TestECHSettingsUnmarshalAliases(t *testing.T) {
+	var settings ECHSettings
+	raw := []byte(`{
+		"enabled":true,
+		"echConfigList":"AAECAw==",
+		"echForceQuery":"full",
+		"echQueryServerName":"public.example.com",
+		"echPrivateKey":"BAUGBw==",
+		"echServerKeys":"CAkKCw=="
+	}`)
+
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatalf("unmarshal ech settings failed: %v", err)
+	}
+
+	if !settings.Enabled {
+		t.Fatal("ECH.Enabled = false, want true")
+	}
+	if settings.ConfigList != "AAECAw==" {
+		t.Fatalf("ECH.ConfigList = %q, want %q", settings.ConfigList, "AAECAw==")
+	}
+	if settings.ForceQuery != "full" {
+		t.Fatalf("ECH.ForceQuery = %q, want %q", settings.ForceQuery, "full")
+	}
+	if settings.QueryServerName != "public.example.com" {
+		t.Fatalf("ECH.QueryServerName = %q, want %q", settings.QueryServerName, "public.example.com")
+	}
+	if settings.PrivateKey != "BAUGBw==" {
+		t.Fatalf("ECH.PrivateKey = %q, want %q", settings.PrivateKey, "BAUGBw==")
+	}
+	if settings.ServerKeys != "CAkKCw==" {
+		t.Fatalf("ECH.ServerKeys = %q, want %q", settings.ServerKeys, "CAkKCw==")
+	}
+}
+
+func TestMergeECHSettingsFromTopLevelNodeConfig(t *testing.T) {
+	nested := ECHSettings{
+		Enabled:    true,
+		ConfigList: "AAECAw==",
+	}
+	topLevel := ECHSettings{
+		PrivateKey: "BAUGBw==",
+		ServerKeys: "CAkKCw==",
+	}
+
+	merged := mergeECHSettings(nested, topLevel)
+	if !merged.Enabled {
+		t.Fatal("merged.Enabled = false, want true")
+	}
+	if merged.ConfigList != "AAECAw==" {
+		t.Fatalf("merged.ConfigList = %q, want %q", merged.ConfigList, "AAECAw==")
+	}
+	if merged.PrivateKey != "BAUGBw==" {
+		t.Fatalf("merged.PrivateKey = %q, want %q", merged.PrivateKey, "BAUGBw==")
+	}
+	if merged.ServerKeys != "CAkKCw==" {
+		t.Fatalf("merged.ServerKeys = %q, want %q", merged.ServerKeys, "CAkKCw==")
+	}
+}

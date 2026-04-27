@@ -188,6 +188,71 @@ func TestBuildV2rayVlessInboundUsesNoneWhenEncryptionDisabled(t *testing.T) {
 	}
 }
 
+func TestGetInboundECHServerKeysAcceptsAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		node *panel.NodeInfo
+		want string
+	}{
+		{
+			name: "vless server keys",
+			node: &panel.NodeInfo{
+				Type: "vless",
+				VAllss: &panel.VAllssNode{
+					TlsSettings: panel.TlsSettings{
+						ECH: panel.ECHSettings{Enabled: true, ServerKeys: "server-key"},
+					},
+				},
+			},
+			want: "server-key",
+		},
+		{
+			name: "vless private key alias",
+			node: &panel.NodeInfo{
+				Type: "vless",
+				VAllss: &panel.VAllssNode{
+					TlsSettings: panel.TlsSettings{
+						ECH: panel.ECHSettings{Enabled: true, PrivateKey: "private-key"},
+					},
+				},
+			},
+			want: "private-key",
+		},
+		{
+			name: "trojan private key alias",
+			node: &panel.NodeInfo{
+				Type: "trojan",
+				Trojan: &panel.TrojanNode{
+					TlsSettings: panel.TlsSettings{
+						ECH: panel.ECHSettings{Enabled: true, PrivateKey: "trojan-private-key"},
+					},
+				},
+			},
+			want: "trojan-private-key",
+		},
+		{
+			name: "disabled",
+			node: &panel.NodeInfo{
+				Type: "vless",
+				VAllss: &panel.VAllssNode{
+					TlsSettings: panel.TlsSettings{
+						ECH: panel.ECHSettings{Enabled: false, ServerKeys: "server-key"},
+					},
+				},
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getInboundECHServerKeys(tt.node); got != tt.want {
+				t.Fatalf("getInboundECHServerKeys() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCollectRouteOutboundTags(t *testing.T) {
 	routeConfig := &coreConf.RouterConfig{RuleList: []json.RawMessage{
 		json.RawMessage(`{"type":"field","outboundTag":"block"}`),
