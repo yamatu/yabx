@@ -26,9 +26,6 @@ on:
       - "go.mod"
       - "go.sum"
       - ".github/workflows/release.yml"
-  release:
-    types: [published]
-
 jobs:
 
   build:
