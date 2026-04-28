@@ -10,6 +10,7 @@ CONFIG_FILE="${CONFIG_DIR}/config.json"
 SERVICE_NAME="V2bX"
 BIN_PATH="${INSTALL_DIR}/V2bX"
 INIT_CONFIG_SCRIPT="${INSTALL_DIR}/initconfig.sh"
+ACME_CF_SCRIPT="${INSTALL_DIR}/acme_cf.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -310,6 +311,17 @@ generate_config() {
   fi
 }
 
+run_acme_manager() {
+  local action="${1:-setup}"
+  if [[ ! -f "$ACME_CF_SCRIPT" ]]; then
+    error "ACME Cloudflare helper not found: $ACME_CF_SCRIPT"
+    error "Please run: v2bx update"
+    return 1
+  fi
+  chmod +x "$ACME_CF_SCRIPT" >/dev/null 2>&1 || true
+  bash "$ACME_CF_SCRIPT" "$action"
+}
+
 show_x25519() {
   if ! ensure_installed; then
     return 1
@@ -374,6 +386,7 @@ v2bx 命令用法:
   v2bx enable|disable
   v2bx config          编辑 /etc/V2bX/config.json
   v2bx generate        配置向导生成 config.json
+  v2bx acme [action]   Cloudflare DNS cert setup/issue/renew/status/edit
   v2bx x25519          生成 X25519 密钥
   v2bx version         查看版本
   v2bx xhttp           显示 xhttp / naive 使用说明
@@ -405,7 +418,8 @@ V2bX 管理菜单
 12. 查看 V2bX 版本
 13. 配置向导(新建/重建 config.json, 含 xhttp / naive 预设)
 14. 协议示例说明(xhttp / naive)
-15. 退出
+15. Cloudflare DNS ACME certificate
+16. 退出
 ----------------------------------------
 EOF
   show_status_line
@@ -414,7 +428,7 @@ EOF
 menu_loop() {
   while true; do
     show_menu
-    read -r -p "请输入选择 [0-15]: " num
+    read -r -p "请输入选择 [0-16]: " num
     case "$num" in
       0) edit_config; pause_back ;;
       1) run_install_script; pause_back ;;
@@ -435,8 +449,9 @@ menu_loop() {
       12) show_version; pause_back ;;
       13) generate_config; pause_back ;;
       14) show_xhttp_help; pause_back ;;
-      15) exit 0 ;;
-      *) warn "请输入 0-15 的数字"; pause_back ;;
+      15) run_acme_manager setup; pause_back ;;
+      16) exit 0 ;;
+      *) warn "请输入 0-16 的数字"; pause_back ;;
     esac
   done
 }
@@ -456,6 +471,7 @@ main() {
       disable) disable_service || rc=$? ;;
       config) edit_config || rc=$? ;;
       generate) generate_config || rc=$? ;;
+      acme|cert) run_acme_manager "${2:-setup}" || rc=$? ;;
       x25519) show_x25519 || rc=$? ;;
       version) show_version || rc=$? ;;
       xhttp) show_xhttp_help || rc=$? ;;

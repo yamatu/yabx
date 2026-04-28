@@ -14,6 +14,7 @@ on:
       - "v*"
     paths:
       - "**/*.go"
+      - "*.sh"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/release.yml"
@@ -21,6 +22,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - "**/*.go"
+      - "*.sh"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/release.yml"
@@ -154,6 +156,7 @@ jobs:
           cp ${GITHUB_WORKSPACE}/LICENSE ./build_assets/LICENSE
           cp ${GITHUB_WORKSPACE}/V2bX.sh ./build_assets/V2bX.sh
           cp ${GITHUB_WORKSPACE}/initconfig.sh ./build_assets/initconfig.sh
+          cp ${GITHUB_WORKSPACE}/acme_cf.sh ./build_assets/acme_cf.sh
           cp ${GITHUB_WORKSPACE}/example/*.json ./build_assets/
           LIST=('geoip' 'geosite')
           for i in "${LIST[@]}"

@@ -352,6 +352,9 @@ install_from_source() {
   if [[ -f "$src_dir/initconfig.sh" ]]; then
     cp -f "$src_dir/initconfig.sh" "$INSTALL_DIR/initconfig.sh"
   fi
+  if [[ -f "$src_dir/acme_cf.sh" ]]; then
+    cp -f "$src_dir/acme_cf.sh" "$INSTALL_DIR/acme_cf.sh"
+  fi
 
   rm -rf "$src_dir"
 }
@@ -460,8 +463,10 @@ install_manager_scripts() {
   local core_cmd_target="/usr/bin/V2bX"
   local core_bin_link="/usr/bin/v2bx-bin"
   local helper_target="$INSTALL_DIR/initconfig.sh"
+  local acme_target="$INSTALL_DIR/acme_cf.sh"
   local menu_source="$INSTALL_DIR/V2bX.sh"
   local helper_source="$INSTALL_DIR/initconfig.sh"
+  local acme_source="$INSTALL_DIR/acme_cf.sh"
 
   # Clean old symlinks/files first to avoid cp following symlink
   # and accidentally overwriting /usr/local/V2bX/V2bX.
@@ -483,8 +488,17 @@ install_manager_scripts() {
     fi
   fi
 
+  if [[ -f "$acme_source" ]]; then
+    chmod +x "$acme_source"
+  else
+    if ! download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/acme_cf.sh" "$acme_target"; then
+      download_file "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/acme_cf.sh" "$acme_target"
+    fi
+  fi
+
   chmod +x "$menu_target"
   chmod +x "$helper_target"
+  chmod +x "$acme_target"
   ln -s "$INSTALL_DIR/$BIN_NAME" "$core_cmd_target"
   ln -s "$INSTALL_DIR/$BIN_NAME" "$core_bin_link"
 }

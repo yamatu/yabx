@@ -76,6 +76,29 @@ bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yabx/main/install.sh) v
 `13` 向导已支持 `vless + xhttp` 预设，以及 `naive (sing)` 预设。
 若选择 `CertMode=file`，向导会提示输入证书和私钥的实际路径（不再固定写死 `/etc/V2bX/`）。
 
+### Cloudflare DNS acme.sh certificate
+
+The one-click script installs `/usr/local/V2bX/acme_cf.sh` and exposes it through `v2bx acme`.
+It uses acme.sh with Cloudflare DNS validation, writes certificates to `/etc/V2bX/fullchain.cer`
+and `/etc/V2bX/cert.key` by default, and restarts `V2bX.service` after a successful issue or renew.
+
+```bash
+v2bx acme setup
+
+# or edit the config directly:
+vi /etc/V2bX/acme_cf.env
+CF_Token='your_cloudflare_api_token'
+CF_Account_ID='your_cloudflare_account_id'
+DOMAIN='domain.com'
+
+v2bx acme issue
+v2bx acme renew
+v2bx acme status
+```
+
+If `/root/.acme.sh/acme.sh` does not exist, the helper installs acme.sh automatically and enables
+the acme.sh cron job. For V2bX nodes, set `CertMode` to `file` and use the default paths above.
+
 ### XHTTP 使用说明
 
 - 项目已在 `core/xray/inbound.go` 中处理 `xhttp`/`splithttp` 入站网络类型。
