@@ -68,7 +68,7 @@ func TestVlessNodeConfig_UnmarshalEncryptionFields(t *testing.T) {
 	}
 }
 
-func TestVlessEncryptionRequiresBothSides(t *testing.T) {
+func TestVlessEncryptionPresenceAcceptsEitherSide(t *testing.T) {
 	tests := []struct {
 		name       string
 		encryption string
@@ -85,13 +85,13 @@ func TestVlessEncryptionRequiresBothSides(t *testing.T) {
 			name:       "missing encryption",
 			encryption: "",
 			decryption: "private-key",
-			enabled:    false,
+			enabled:    true,
 		},
 		{
 			name:       "missing decryption",
 			encryption: "public-key",
 			decryption: "",
-			enabled:    false,
+			enabled:    true,
 		},
 		{
 			name:       "blank values",

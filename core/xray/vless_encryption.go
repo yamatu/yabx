@@ -17,7 +17,7 @@ const (
 )
 
 func resolveVlessInboundDecryption(v *panel.VAllssNode) string {
-	if v == nil || !v.HasVlessEncryption() {
+	if v == nil || !v.HasVlessInboundDecryption() {
 		return "none"
 	}
 
@@ -38,7 +38,7 @@ func resolveVlessInboundDecryption(v *panel.VAllssNode) string {
 }
 
 func resolveVlessOutboundEncryption(v *panel.VAllssNode) string {
-	if v == nil || !v.HasVlessEncryption() {
+	if v == nil || !v.HasVlessOutboundEncryption() {
 		return ""
 	}
 

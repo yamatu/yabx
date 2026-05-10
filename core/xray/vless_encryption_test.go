@@ -52,7 +52,7 @@ func TestBuildVlessUserDisablesEncryptionWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestResolveVlessInboundDecryptionReturnsNoneWithoutCompletePair(t *testing.T) {
+func TestResolveVlessInboundDecryptionReturnsNoneWhenMissing(t *testing.T) {
 	tests := []struct {
 		name string
 		node *panel.VAllssNode
@@ -60,13 +60,40 @@ func TestResolveVlessInboundDecryptionReturnsNoneWithoutCompletePair(t *testing.
 		{name: "nil node", node: nil},
 		{name: "empty values", node: &panel.VAllssNode{}},
 		{name: "missing decryption", node: &panel.VAllssNode{Encryption: "mlkem768x25519plus.native.0rtt.some-key"}},
-		{name: "missing encryption", node: &panel.VAllssNode{Decryption: "mlkem768x25519plus.native.600s.some-key"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := resolveVlessInboundDecryption(tt.node); got != "none" {
 				t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, "none")
+			}
+		})
+	}
+}
+
+func TestResolveVlessInboundDecryptionAcceptsXboardDecryptionOnly(t *testing.T) {
+	structuredDec := "mlkem768x25519plus.native.600s.some-key"
+	node := &panel.VAllssNode{Decryption: structuredDec}
+
+	if got := resolveVlessInboundDecryption(node); got != structuredDec {
+		t.Fatalf("resolveVlessInboundDecryption() = %q, want %q", got, structuredDec)
+	}
+}
+
+func TestResolveVlessOutboundEncryptionReturnsEmptyWhenMissing(t *testing.T) {
+	tests := []struct {
+		name string
+		node *panel.VAllssNode
+	}{
+		{name: "nil node", node: nil},
+		{name: "empty values", node: &panel.VAllssNode{}},
+		{name: "missing encryption", node: &panel.VAllssNode{Decryption: "mlkem768x25519plus.native.600s.some-key"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveVlessOutboundEncryption(tt.node); got != "" {
+				t.Fatalf("resolveVlessOutboundEncryption() = %q, want empty", got)
 			}
 		})
 	}

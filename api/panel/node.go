@@ -105,7 +105,21 @@ func (v *VAllssNode) HasVlessEncryption() bool {
 	if v == nil {
 		return false
 	}
-	return v.NormalizedEncryption() != "" && v.NormalizedDecryption() != ""
+	return v.HasVlessOutboundEncryption() || v.HasVlessInboundDecryption()
+}
+
+func (v *VAllssNode) HasVlessOutboundEncryption() bool {
+	if v == nil {
+		return false
+	}
+	return v.NormalizedEncryption() != ""
+}
+
+func (v *VAllssNode) HasVlessInboundDecryption() bool {
+	if v == nil {
+		return false
+	}
+	return v.NormalizedDecryption() != ""
 }
 
 type TlsSettings struct {
