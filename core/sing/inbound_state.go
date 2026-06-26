@@ -8,75 +8,73 @@ import (
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/conf"
 	vCore "github.com/InazumaV/V2bX/core"
-	"github.com/sagernet/sing/common/auth"
 	F "github.com/sagernet/sing/common/format"
 )
 
-type naiveInboundState struct {
+type singInboundState struct {
 	info   *panel.NodeInfo
 	config *conf.Options
 	users  map[string]panel.UserInfo
 }
 
-func (b *Sing) addNaiveNode(tag string, info *panel.NodeInfo, config *conf.Options) {
-	b.naiveMu.Lock()
-	defer b.naiveMu.Unlock()
+func (b *Sing) addSingNode(tag string, info *panel.NodeInfo, config *conf.Options) error {
+	if _, err := getInboundOptions(tag, info, config, nil, nil); err != nil {
+		return err
+	}
 
-	b.naiveState[tag] = &naiveInboundState{
+	b.singMu.Lock()
+	defer b.singMu.Unlock()
+
+	b.singState[tag] = &singInboundState{
 		info:   info,
 		config: config,
 		users:  make(map[string]panel.UserInfo),
 	}
+	return nil
 }
 
-func (b *Sing) hasNaiveNode(tag string) bool {
-	b.naiveMu.Lock()
-	defer b.naiveMu.Unlock()
+func (b *Sing) deleteSingNode(tag string) bool {
+	b.singMu.Lock()
+	defer b.singMu.Unlock()
 
-	_, found := b.naiveState[tag]
+	_, found := b.singState[tag]
+	delete(b.singState, tag)
 	return found
 }
 
-func (b *Sing) deleteNaiveNode(tag string) {
-	b.naiveMu.Lock()
-	defer b.naiveMu.Unlock()
+func (b *Sing) addSingUsers(p *vCore.AddUsersParams) (int, error) {
+	b.singMu.Lock()
+	defer b.singMu.Unlock()
 
-	delete(b.naiveState, tag)
-}
-
-func (b *Sing) addNaiveUsers(p *vCore.AddUsersParams) (int, error) {
-	b.naiveMu.Lock()
-	defer b.naiveMu.Unlock()
-
-	state, found := b.naiveState[p.Tag]
+	state, found := b.singState[p.Tag]
 	if !found {
-		return 0, errors.New("the naive inbound state not found")
+		return 0, errors.New("the sing inbound state not found")
 	}
 	state.info = p.NodeInfo
 	for _, user := range p.Users {
 		state.users[user.Uuid] = user
 	}
-	if err := b.applyNaiveInboundLocked(p.Tag, state); err != nil {
+	if err := b.applySingInboundLocked(p.Tag, state); err != nil {
 		return 0, err
 	}
 	return len(p.Users), nil
 }
 
-func (b *Sing) delNaiveUsers(users []panel.UserInfo, tag string) error {
-	b.naiveMu.Lock()
-	defer b.naiveMu.Unlock()
+func (b *Sing) delSingUsers(users []panel.UserInfo, tag string) error {
+	b.singMu.Lock()
+	defer b.singMu.Unlock()
 
-	state, found := b.naiveState[tag]
+	state, found := b.singState[tag]
 	if !found {
-		return errors.New("the naive inbound state not found")
+		return errors.New("the sing inbound state not found")
 	}
 	for _, user := range users {
 		delete(state.users, user.Uuid)
 	}
-	return b.applyNaiveInboundLocked(tag, state)
+	return b.applySingInboundLocked(tag, state)
 }
 
-func (b *Sing) applyNaiveInboundLocked(tag string, state *naiveInboundState) error {
+func (b *Sing) applySingInboundLocked(tag string, state *singInboundState) error {
 	in := b.box.Inbound()
 	if len(state.users) == 0 {
 		if _, found := in.Get(tag); found {
@@ -87,7 +85,7 @@ func (b *Sing) applyNaiveInboundLocked(tag string, state *naiveInboundState) err
 		return nil
 	}
 
-	inboundOptions, err := getInboundOptions(tag, state.info, state.config, nil, buildNaiveAuthUsers(state.users))
+	inboundOptions, err := getInboundOptions(tag, state.info, state.config, buildSortedPanelUsers(state.users), nil)
 	if err != nil {
 		return err
 	}
@@ -110,19 +108,16 @@ func (b *Sing) applyNaiveInboundLocked(tag string, state *naiveInboundState) err
 	return nil
 }
 
-func buildNaiveAuthUsers(users map[string]panel.UserInfo) []auth.User {
+func buildSortedPanelUsers(users map[string]panel.UserInfo) []panel.UserInfo {
 	keys := make([]string, 0, len(users))
 	for uuid := range users {
 		keys = append(keys, uuid)
 	}
 	sort.Strings(keys)
 
-	authUsers := make([]auth.User, 0, len(keys))
+	sortedUsers := make([]panel.UserInfo, 0, len(keys))
 	for _, uuid := range keys {
-		authUsers = append(authUsers, auth.User{
-			Username: uuid,
-			Password: uuid,
-		})
+		sortedUsers = append(sortedUsers, users[uuid])
 	}
-	return authUsers
+	return sortedUsers
 }

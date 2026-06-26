@@ -21,11 +21,20 @@ func (m *fakeOnlineMap) AddIP(ip string) {
 	m.ips = append(m.ips, ip)
 }
 
+func (m *fakeOnlineMap) RemoveIP(ip string) {
+	for i, existing := range m.ips {
+		if existing == ip {
+			m.ips = append(m.ips[:i], m.ips[i+1:]...)
+			return
+		}
+	}
+}
+
 func (m *fakeOnlineMap) List() []string {
 	return append([]string(nil), m.ips...)
 }
 
-func (m *fakeOnlineMap) IpTimeMap() map[string]time.Time {
+func (m *fakeOnlineMap) IPTimeMap() map[string]time.Time {
 	result := make(map[string]time.Time, len(m.ips))
 	for _, ip := range m.ips {
 		result[ip] = time.Now()
@@ -69,6 +78,8 @@ func (m *fakeStatsManager) GetOnlineMap(name string) statsFeature.OnlineMap {
 func (m *fakeStatsManager) RegisterChannel(string) (statsFeature.Channel, error) { return nil, nil }
 func (m *fakeStatsManager) UnregisterChannel(string) error                       { return nil }
 func (m *fakeStatsManager) GetChannel(string) statsFeature.Channel               { return nil }
+
+func (m *fakeStatsManager) GetAllOnlineUsers() []string { return nil }
 
 func TestGetOnlineUsersFromStatsManager(t *testing.T) {
 	tag := "test-node"
