@@ -481,7 +481,8 @@ generate_config_file() {
       },
       \"AssetPath\": \"/etc/V2bX/\",
       \"DnsConfigPath\": \"/etc/V2bX/dns.json\",
-      \"RouteConfigPath\": \"/etc/V2bX/route.json\"
+      \"RouteConfigPath\": \"/etc/V2bX/route.json\",
+      \"OutboundConfigPath\": \"/etc/V2bX/custom_outbound.json\"
     }")
   fi
   if [[ "$use_sing_core" == "1" ]]; then

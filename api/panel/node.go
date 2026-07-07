@@ -380,6 +380,9 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 				ForceContentType("application/json").
 				Get(path)
 
+			if err = c.checkResponse(r, path, err); err != nil {
+				return nil, err
+			}
 			if r.StatusCode() == 304 {
 				return nil, nil
 			}
@@ -390,9 +393,6 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 			}
 			c.responseBodyHash = newBodyHash
 			c.nodeEtag = r.Header().Get("ETag")
-			if err = c.checkResponse(r, path, err); err != nil {
-				return nil, err
-			}
 
 			if r != nil {
 				defer func() {
@@ -491,6 +491,9 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 				ForceContentType("application/json").
 				Get(path)
 
+			if err = c.checkResponse(r, path, err); err != nil {
+				return nil, err
+			}
 			if r.StatusCode() == 304 {
 				return nil, nil
 			}
@@ -501,9 +504,6 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 			}
 			c.responseBodyHash = newBodyHash
 			c.nodeEtag = r.Header().Get("ETag")
-			if err = c.checkResponse(r, path, err); err != nil {
-				return nil, err
-			}
 
 			if r != nil {
 				defer func() {
@@ -705,10 +705,8 @@ func (c *Client) ReportNodeStatus(nodeStatus *NodeStatus) (err error) {
 			Disk:      nodeStatus.Disk,
 			UpdatedAt: time.Now().UnixMilli(),
 		}
-		if _, err = c.client.R().SetBody(status).ForceContentType("application/json").Post(path); err != nil {
-			return fmt.Errorf("request %s failed: %v", c.assembleURL(path), err.Error())
-		}
-		return nil
+		r, err := c.client.R().SetBody(status).ForceContentType("application/json").Post(path)
+		return c.checkResponse(r, path, err)
 	default:
 		payload := map[string]interface{}{
 			"cpu": nodeStatus.CPU,

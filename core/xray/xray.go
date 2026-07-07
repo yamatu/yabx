@@ -3,6 +3,7 @@ package xray
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -125,14 +126,21 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 	}
 	// Custom Outbound config
 	var coreCustomOutboundConfig []coreConf.OutboundDetourConfig
-	if c.OutboundConfigPath != "" {
-		data, err := os.ReadFile(c.OutboundConfigPath)
+	outboundConfigPath := resolveOutboundConfigPath(c.RouteConfigPath, c.OutboundConfigPath)
+	if outboundConfigPath != "" {
+		data, err := os.ReadFile(outboundConfigPath)
 		if err != nil {
 			log.WithField("err", err).Panic("Failed to read Custom Outbound config file")
 		} else {
 			if err = json.Unmarshal(data, &coreCustomOutboundConfig); err != nil {
 				log.WithField("err", err).Panic("Failed to unmarshal Custom Outbound config")
 			}
+		}
+		if c.OutboundConfigPath == "" {
+			log.WithFields(log.Fields{
+				"routeConfigPath":    c.RouteConfigPath,
+				"outboundConfigPath": outboundConfigPath,
+			}).Info("Auto loaded xray outbound config from route config directory")
 		}
 	}
 	var outBoundConfig []*core.OutboundHandlerConfig
@@ -143,7 +151,15 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 		}
 		outBoundConfig = append(outBoundConfig, oc)
 	}
-	validateRouteOutboundReferences(c.RouteConfigPath, coreRouterConfig, c.OutboundConfigPath, coreCustomOutboundConfig)
+	log.WithFields(log.Fields{
+		"assetPath":           c.AssetPath,
+		"dnsConfigPath":       c.DnsConfigPath,
+		"routeConfigPath":     c.RouteConfigPath,
+		"outboundConfigPath":  outboundConfigPath,
+		"customInboundCount":  len(inBoundConfig),
+		"customOutboundCount": len(outBoundConfig),
+	}).Info("Loaded xray core config")
+	validateRouteOutboundReferences(c.RouteConfigPath, coreRouterConfig, outboundConfigPath, coreCustomOutboundConfig)
 	// Policy config
 	levelPolicyConfig := parseConnectionConfig(c.ConnectionConfig)
 	corePolicyConfig := &coreConf.PolicyConfig{}
@@ -212,6 +228,24 @@ func (c *Xray) Protocols() []string {
 
 func (c *Xray) Type() string {
 	return "xray"
+}
+
+func resolveOutboundConfigPath(routeConfigPath string, outboundConfigPath string) string {
+	outboundConfigPath = strings.TrimSpace(outboundConfigPath)
+	if outboundConfigPath != "" {
+		return outboundConfigPath
+	}
+
+	routeConfigPath = strings.TrimSpace(routeConfigPath)
+	if routeConfigPath == "" {
+		return ""
+	}
+
+	candidate := filepath.Join(filepath.Dir(routeConfigPath), "custom_outbound.json")
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		return candidate
+	}
+	return ""
 }
 
 func validateRouteOutboundReferences(routeConfigPath string, routeConfig *coreConf.RouterConfig, outboundConfigPath string, outboundConfigs []coreConf.OutboundDetourConfig) {

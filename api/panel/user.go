@@ -120,6 +120,9 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				SetHeader("If-None-Match", c.userEtag).
 				ForceContentType("application/json").
 				Get(path)
+			if err = c.checkResponse(r, path, err); err != nil {
+				return nil, err
+			}
 			if r == nil || r.RawResponse == nil {
 				return nil, fmt.Errorf("received nil response or raw response")
 			}
@@ -129,9 +132,6 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				return nil, nil
 			}
 
-			if err = c.checkResponse(r, path, err); err != nil {
-				return nil, err
-			}
 			userlist := &UserListBody{}
 			if err := json.Unmarshal(r.Body(), userlist); err != nil {
 				return nil, fmt.Errorf("unmarshal user list error: %w", err)
@@ -147,6 +147,9 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				SetHeader("If-None-Match", c.userEtag).
 				ForceContentType("application/json").
 				Get(path)
+			if err = c.checkResponse(r, path, err); err != nil {
+				return nil, err
+			}
 			if r == nil || r.RawResponse == nil {
 				return nil, fmt.Errorf("received nil response or raw response")
 			}
@@ -156,9 +159,6 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				return nil, nil
 			}
 
-			if err = c.checkResponse(r, path, err); err != nil {
-				return nil, err
-			}
 			userlist := &UserListBody{}
 			if err := json.Unmarshal(r.Body(), userlist); err != nil {
 				return nil, fmt.Errorf("unmarshal user list error: %w", err)
