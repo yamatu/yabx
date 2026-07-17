@@ -44,15 +44,14 @@ func TestDedupeOnlineUsersByIP(t *testing.T) {
 		{UID: 2, IP: "2.2.2.2"},
 		{UID: 1, IP: "1.1.1.1"},
 		{UID: 3, IP: "2.2.2.2"},
-		{UID: 2, IP: "::ffff:2.2.2.2"},
 		{UID: 4, IP: ""},
+		{UID: 5, IP: "1.1.1.1"},
 	}
 
 	got := dedupeOnlineUsersByIP(input)
 	want := []panel.OnlineUser{
 		{UID: 1, IP: "1.1.1.1"},
 		{UID: 2, IP: "2.2.2.2"},
-		{UID: 3, IP: "2.2.2.2"},
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -64,14 +63,14 @@ func TestDedupeOnlineIPMapByIP(t *testing.T) {
 	input := map[int][]string{
 		2: {"2.2.2.2", "3.3.3.3"},
 		1: {"1.1.1.1", "2.2.2.2", ""},
-		3: {"3.3.3.3", "4.4.4.4", "::ffff:4.4.4.4"},
+		3: {"3.3.3.3", "4.4.4.4"},
 	}
 
 	got := dedupeOnlineIPMapByIP(input)
 	want := map[int][]string{
 		1: {"1.1.1.1", "2.2.2.2"},
-		2: {"2.2.2.2", "3.3.3.3"},
-		3: {"3.3.3.3", "4.4.4.4"},
+		2: {"3.3.3.3"},
+		3: {"4.4.4.4"},
 	}
 
 	if !reflect.DeepEqual(got, want) {

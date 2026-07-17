@@ -87,7 +87,7 @@ func (b *Sing) applyNaiveInboundLocked(tag string, state *naiveInboundState) err
 		return nil
 	}
 
-	inboundOptions, err := getInboundOptions(tag, state.info, state.config, nil, buildNaiveAuthUsers(state.users))
+	inboundOptions, err := getInboundOptions(tag, state.info, state.config, buildNaiveAuthUsers(state.users))
 	if err != nil {
 		return err
 	}

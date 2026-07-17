@@ -70,9 +70,8 @@ prompt_node_type() {
   echo "4) shadowsocks" >&2
   echo "5) vless (手动模式)" >&2
   echo "6) naive (sing)" >&2
-  echo "7) hysteria2" >&2
   while true; do
-    read -r -p "输入 [1-7]: " n
+    read -r -p "输入 [1-6]: " n
     case "$n" in
       1) printf 'vless_xhttp'; return ;;
       2) printf 'vmess'; return ;;
@@ -80,8 +79,7 @@ prompt_node_type() {
       4) printf 'shadowsocks'; return ;;
       5) printf 'vless'; return ;;
       6) printf 'naive'; return ;;
-      7) printf 'hysteria2'; return ;;
-      *) wizard_warn "请输入 1-7" ;;
+      *) wizard_warn "请输入 1-6" ;;
     esac
   done
 }
@@ -184,7 +182,7 @@ EOF
 
 ensure_sidecar_files() {
   mkdir -p "$CONFIG_DIR"
-  for file in dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json config_hysteria2.json; do
+  for file in dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json; do
     if [[ ! -f "$CONFIG_DIR/$file" && -f "$INSTALL_DIR/$file" ]]; then
       cp -f "$INSTALL_DIR/$file" "$CONFIG_DIR/$file"
     fi
@@ -233,20 +231,17 @@ generate_config_file() {
   local i
   local use_xray_core="0"
   local use_sing_core="0"
-  local use_hysteria2_core="0"
 
   declare -a CORE_BLOCKS
   declare -a NODE_BLOCKS
   declare -a XHTTP_HINTS
   declare -a NAIVE_HINTS
-  declare -a HY2_HINTS
 
   echo "V2bX 配置向导"
   echo "- 主配置文件将写入: $CONFIG_FILE"
   echo "- 旧配置会备份为: ${CONFIG_FILE}.bak"
   echo "- xhttp 示例: ${CONFIG_DIR}/config_xhttp_reality.json"
   echo "- naive 示例: ${CONFIG_DIR}/config_naive.json"
-  echo "- hysteria2 示例: ${CONFIG_DIR}/config_hysteria2.json"
   echo "- xhttp 模板: ${CONFIG_DIR}/xhttp_template.conf"
 
   if ! prompt_yes_no "确认开始生成配置" 1; then
@@ -341,21 +336,6 @@ generate_config_file() {
         [[ -f "$cert_key" ]] || wizard_warn "私钥文件不存在: $cert_key"
       fi
       NAIVE_HINTS+=("${node_name}")
-    elif [[ "$node_choice" == "hysteria2" ]]; then
-      node_core="hysteria2"
-      cert_mode="$(prompt_cert_mode)"
-      while [[ "$cert_mode" == "none" ]]; do
-        wizard_warn "hysteria2 需要 TLS 证书，CertMode 不能为 none"
-        cert_mode="$(prompt_cert_mode)"
-      done
-      cert_domain="$(prompt_non_empty '请输入证书域名(例如 hy2.example.com): ')"
-      if [[ "$cert_mode" == "file" ]]; then
-        cert_file="$(prompt_with_default '请输入证书文件路径(fullchain.cer)' '/etc/V2bX/fullchain.cer')"
-        cert_key="$(prompt_with_default '请输入私钥文件路径(cert.key)' '/etc/V2bX/cert.key')"
-        [[ -f "$cert_file" ]] || wizard_warn "证书文件不存在: $cert_file"
-        [[ -f "$cert_key" ]] || wizard_warn "私钥文件不存在: $cert_key"
-      fi
-      HY2_HINTS+=("${node_name}")
     else
       if prompt_yes_no "该节点是否启用 TLS 证书配置" 0; then
         cert_mode="$(prompt_cert_mode)"
@@ -386,31 +366,6 @@ generate_config_file() {
       \"EnableTFO\": true,
       \"EnableDNS\": true,
       \"DomainStrategy\": \"ipv4_only\",
-      \"CertConfig\": {
-        \"CertMode\": \"${cert_mode}\",
-        \"RejectUnknownSni\": false,
-        \"CertDomain\": \"${cert_domain}\",
-        \"CertFile\": \"${cert_file}\",
-        \"KeyFile\": \"${cert_key}\",
-        \"Provider\": \"cloudflare\",
-        \"Email\": \"admin@example.com\",
-        \"DNSEnv\": {
-          \"EnvName\": \"env1\"
-        }
-      }
-    }")
-    elif [[ "$node_core" == "hysteria2" ]]; then
-      use_hysteria2_core="1"
-      NODE_BLOCKS+=("    {
-      \"Name\": \"${node_name}\",
-      \"Core\": \"hysteria2\",
-      \"ApiHost\": \"${api_host}\",
-      \"ApiKey\": \"${api_key}\",
-      \"NodeID\": ${node_id},
-      \"NodeType\": \"hysteria2\",
-      \"Timeout\": 30,
-      \"ListenIP\": \"0.0.0.0\",
-      \"SendIP\": \"0.0.0.0\",
       \"CertConfig\": {
         \"CertMode\": \"${cert_mode}\",
         \"RejectUnknownSni\": false,
@@ -481,8 +436,7 @@ generate_config_file() {
       },
       \"AssetPath\": \"/etc/V2bX/\",
       \"DnsConfigPath\": \"/etc/V2bX/dns.json\",
-      \"RouteConfigPath\": \"/etc/V2bX/route.json\",
-      \"OutboundConfigPath\": \"/etc/V2bX/custom_outbound.json\"
+      \"RouteConfigPath\": \"/etc/V2bX/route.json\"
     }")
   fi
   if [[ "$use_sing_core" == "1" ]]; then
@@ -496,14 +450,6 @@ generate_config_file() {
         \"Enable\": true,
         \"Server\": \"time.apple.com\",
         \"ServerPort\": 0
-      }
-    }")
-  fi
-  if [[ "$use_hysteria2_core" == "1" ]]; then
-    CORE_BLOCKS+=("    {
-      \"Type\": \"hysteria2\",
-      \"Log\": {
-        \"Level\": \"error\"
       }
     }")
   fi
@@ -568,14 +514,6 @@ EOF
     done
     wizard_info "面板侧请同步设置: protocol=naive；本地节点已自动写为 sing Core"
     wizard_info "可参考: ${CONFIG_DIR}/config_naive.json"
-  fi
-  if [[ ${#HY2_HINTS[@]} -gt 0 ]]; then
-    wizard_info "本次向导已选择 hysteria2 的节点:"
-    for i in "${!HY2_HINTS[@]}"; do
-      wizard_info "- ${HY2_HINTS[$i]}"
-    done
-    wizard_info "面板侧请同步设置: protocol=hysteria2；本地节点已自动写为 hysteria2 Core"
-    wizard_info "可参考: ${CONFIG_DIR}/config_hysteria2.json"
   fi
 
   restart_service_if_needed

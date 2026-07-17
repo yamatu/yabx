@@ -3,8 +3,6 @@ package xray
 import (
 	"bytes"
 	"encoding/base64"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -325,29 +323,6 @@ func TestValidateRouteOutboundReferencesWarnsForMissingTag(t *testing.T) {
 	}
 	if !strings.Contains(logged, "OutboundConfigPath") {
 		t.Fatalf("validateRouteOutboundReferences() log = %q, want OutboundConfigPath hint", logged)
-	}
-}
-
-func TestResolveOutboundConfigPathAutoDiscoversRouteSidecar(t *testing.T) {
-	dir := t.TempDir()
-	routePath := filepath.Join(dir, "route.json")
-	outboundPath := filepath.Join(dir, "custom_outbound.json")
-	if err := os.WriteFile(routePath, []byte(`{}`), 0o600); err != nil {
-		t.Fatalf("write route config failed: %v", err)
-	}
-	if err := os.WriteFile(outboundPath, []byte(`[]`), 0o600); err != nil {
-		t.Fatalf("write outbound config failed: %v", err)
-	}
-
-	if got := resolveOutboundConfigPath(routePath, ""); got != outboundPath {
-		t.Fatalf("resolveOutboundConfigPath() = %q, want %q", got, outboundPath)
-	}
-}
-
-func TestResolveOutboundConfigPathKeepsExplicitPath(t *testing.T) {
-	explicitPath := "/tmp/explicit_outbound.json"
-	if got := resolveOutboundConfigPath("/tmp/route.json", explicitPath); got != explicitPath {
-		t.Fatalf("resolveOutboundConfigPath() = %q, want %q", got, explicitPath)
 	}
 }
 

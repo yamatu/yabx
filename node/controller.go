@@ -43,41 +43,17 @@ func NewController(server vCore.Core, api *panel.Client, config *conf.Options) *
 
 // Start implement the Start() function of the service interface
 func (c *Controller) Start() error {
-	log.WithFields(log.Fields{
-		"apiHost":  c.apiClient.APIHost,
-		"nodeType": c.apiClient.NodeType,
-		"nodeId":   c.apiClient.NodeId,
-		"name":     c.Options.Name,
-	}).Info("Starting node controller")
-
 	// First fetch Node Info
 	var err error
 	node, err := c.apiClient.GetNodeInfo()
 	if err != nil {
 		return fmt.Errorf("get node info error: %s", err)
 	}
-	if node == nil {
-		return errors.New("get node info error: panel returned empty node config on initial start")
-	}
-	log.WithFields(log.Fields{
-		"apiHost":      c.apiClient.APIHost,
-		"nodeType":     node.Type,
-		"nodeId":       node.Id,
-		"security":     node.Security,
-		"pullInterval": node.PullInterval.String(),
-		"pushInterval": node.PushInterval.String(),
-	}).Info("Fetched node info from panel")
-
 	// Update user
 	c.userList, err = c.apiClient.GetUserList()
 	if err != nil {
 		return fmt.Errorf("get user list error: %s", err)
 	}
-	log.WithFields(log.Fields{
-		"apiHost": c.apiClient.APIHost,
-		"nodeId":  c.apiClient.NodeId,
-		"users":   len(c.userList),
-	}).Info("Fetched user list from panel")
 	if len(c.userList) == 0 {
 		return errors.New("add users error: not have any user")
 	}
@@ -85,11 +61,6 @@ func (c *Controller) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to get user alive list: %s", err)
 	}
-	log.WithFields(log.Fields{
-		"apiHost":    c.apiClient.APIHost,
-		"nodeId":     c.apiClient.NodeId,
-		"aliveUsers": len(c.aliveMap),
-	}).Info("Fetched alive user list from panel")
 	if len(c.Options.Name) == 0 {
 		c.tag = c.buildNodeTag(node)
 	} else {
@@ -103,10 +74,6 @@ func (c *Controller) Start() error {
 		return fmt.Errorf("update rule error: %s", err)
 	}
 	c.limiter = l
-	log.WithFields(log.Fields{
-		"tag":   c.tag,
-		"rules": len(node.Rules.Protocol) + len(node.Rules.Regexp),
-	}).Info("Limiter initialized")
 	if node.Security == panel.Tls {
 		err = c.requestCert()
 		if err != nil {
@@ -118,11 +85,6 @@ func (c *Controller) Start() error {
 	if err != nil {
 		return fmt.Errorf("add new node error: %s", err)
 	}
-	log.WithFields(log.Fields{
-		"tag":      c.tag,
-		"core":     c.Options.Core,
-		"nodeType": node.Type,
-	}).Info("Added node to core")
 	added, err := c.server.AddUsers(&vCore.AddUsersParams{
 		Tag:      c.tag,
 		Users:    c.userList,

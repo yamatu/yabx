@@ -32,8 +32,6 @@ type Sing struct {
 	logFactory log.Factory
 	naiveMu    sync.Mutex
 	naiveState map[string]*naiveInboundState
-	singMu     sync.Mutex
-	singState  map[string]*singInboundState
 }
 
 func init() {
@@ -42,7 +40,7 @@ func init() {
 
 func New(c *conf.CoreConfig) (vCore.Core, error) {
 	ctx := context.Background()
-	ctx = include.Context(ctx)
+	ctx = box.Context(ctx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), include.DNSTransportRegistry())
 	options := option.Options{}
 	if len(c.SingConfig.OriginalPath) != 0 {
 		data, err := os.ReadFile(c.SingConfig.OriginalPath)
@@ -77,15 +75,14 @@ func New(c *conf.CoreConfig) (vCore.Core, error) {
 		return nil, err
 	}
 	hs := NewHookServer()
-	b.Router().AppendTracker(hs)
+	b.Router().SetTracker(hs)
 	return &Sing{
-		ctx:        ctx,
+		ctx:        b.Router().GetCtx(),
 		box:        b,
 		hookServer: hs,
 		router:     b.Router(),
 		logFactory: b.LogFactory(),
 		naiveState: make(map[string]*naiveInboundState),
-		singState:  make(map[string]*singInboundState),
 	}, nil
 }
 

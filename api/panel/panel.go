@@ -83,13 +83,6 @@ func New(c *conf.ApiConfig) (*Client, error) {
 			})
 		}
 	}
-	logrus.WithFields(logrus.Fields{
-		"apiHost":   c.APIHost,
-		"panelType": c.PanelType,
-		"nodeType":  c.NodeType,
-		"nodeId":    c.NodeID,
-		"timeout":   client.GetClient().Timeout.String(),
-	}).Info("Panel API client initialized")
 
 	return &Client{
 		client:    client,

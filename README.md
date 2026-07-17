@@ -54,15 +54,14 @@ V2BX_SKIP_BASE_INSTALL=1 bash install.sh v1.0.7
 bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yabx/main/install.sh) v1.0.7
 ```
 
-安装脚本会自动写入 systemd 服务，并保留你已有的 `/etc/V2bX/config.json`。首次安装会额外放置 XHTTP / Naive / Hysteria2 示例配置：
+安装脚本会自动写入 systemd 服务，并保留你已有的 `/etc/V2bX/config.json`。首次安装会额外放置 XHTTP / Naive 示例配置：
 
 安装完成后，执行 `v2bx` 会进入数字菜单（0/1/2...）管理模式，可直接进行安装/更新/重启/日志/配置生成等操作。
 
-若仓库暂未发布 Release，脚本会自动切换为源码编译安装（默认包含 `xray + sing + hysteria2` 内核编译标签），同样可用 xhttp / naive / hysteria2。源码编译需要 Go 1.26+；脚本会在本机 Go 版本不足时下载私有 Go 工具链到 `/usr/local/lib/v2bx-go/`。
+若仓库暂未发布 Release，脚本会自动切换为源码编译安装（默认包含 `xray + sing` 内核编译标签），同样可用 xhttp / naive。
 
 - `/etc/V2bX/config_xhttp_reality.json`
 - `/etc/V2bX/config_naive.json`
-- `/etc/V2bX/config_hysteria2.json`
 - `/etc/V2bX/xhttp_template.conf`
 
 ### 配置文件位置
@@ -74,7 +73,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yabx/main/install.sh) v
 - 自定义入站：`/etc/V2bX/custom_inbound.json`
 
 可通过 `v2bx` 菜单中的 `0` 编辑主配置，或 `13` 使用向导新建/重建配置。
-`13` 向导已支持 `vless + xhttp`、`naive (sing)`、`hysteria2` 预设。
+`13` 向导已支持 `vless + xhttp` 预设，以及 `naive (sing)` 预设。
 若选择 `CertMode=file`，向导会提示输入证书和私钥的实际路径（不再固定写死 `/etc/V2bX/`）。
 
 ### Cloudflare DNS acme.sh certificate
@@ -116,12 +115,6 @@ the acme.sh cron job. For V2bX nodes, set `CertMode` to `file` and use the defau
 - 安装后可直接参考 `/etc/V2bX/config_naive.json`，或用 `v2bx` 菜单的 `13` 生成 naive 配置。
 - naive 需要 TLS 证书，建议不要使用 `CertMode=none`。
 
-### Hysteria2 使用说明
-
-- 面板节点请使用 `hysteria2` 协议，本地 `config.json` 中节点 `Core` 可使用 `hysteria2`。
-- 安装后可直接参考 `/etc/V2bX/config_hysteria2.json`，或用 `v2bx` 菜单的 `13` 生成 hysteria2 配置。
-- hysteria2 需要 TLS 证书，建议使用 `v2bx acme issue` 生成证书后配置 `CertMode=file`。
-
 ### XBoard 对接说明
 
 - 用户流量上报（`/push`）按 **用户 ID(uid)** 统计，不是 uuid。
@@ -138,11 +131,11 @@ the acme.sh cron job. For V2bX nodes, set `CertMode` to `file` and use the defau
 
 ## 构建
 ``` bash
-# 默认构建 xray + sing + hysteria2 内核（支持 xhttp / naive / hysteria2）
-go build -v -o ./V2bX -tags "xray sing hysteria2 with_quic with_grpc with_utls with_wireguard with_acme" -trimpath -ldflags "-s -w -buildid="
+# 默认构建 xray + sing 内核（支持 xhttp / naive）
+go build -v -o ./V2bX -tags "xray sing with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" -trimpath -ldflags "-s -w -buildid="
 
 # 如需自定义 tags，可在安装脚本中设置：
-# V2BX_BUILD_TAGS="xray sing hysteria2 with_quic with_grpc with_utls with_wireguard with_acme" bash install.sh
+# V2BX_BUILD_TAGS="xray sing hysteria2 with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" bash install.sh
 ```
 
 ## 配置文件及详细使用教程

@@ -1,7 +1,8 @@
 package sing
 
 import (
-	"errors"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/sagernet/sing-box/option"
 	singauth "github.com/sagernet/sing/common/auth"
+	F "github.com/sagernet/sing/common/format"
 	"github.com/sagernet/sing/common/json/badoption"
 )
 
@@ -48,7 +50,7 @@ type HttpupgradeNetworkConfig struct {
 	Host string `json:"host"`
 }
 
-func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users []panel.UserInfo, naiveUsers []singauth.User) (option.Inbound, error) {
+func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, naiveUsers []singauth.User) (option.Inbound, error) {
 	addr, err := netip.ParseAddr(c.ListenIP)
 	if err != nil {
 		return option.Inbound{}, fmt.Errorf("the listen ip not vail")
@@ -112,6 +114,7 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 				Enabled:    true,
 				ShortID:    []string{v.TlsSettings.ShortId},
 				PrivateKey: v.TlsSettings.PrivateKey,
+				Xver:       uint8(v.TlsSettings.Xver),
 				Handshake: option.InboundRealityHandshakeOptions{
 					ServerOptions: option.ServerOptions{
 						Server:     dest,
@@ -136,6 +139,7 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 				Enabled:    true,
 				ShortID:    []string{v.TlsSettings.ShortId},
 				PrivateKey: v.TlsSettings.PrivateKey,
+				Xver:       uint8(v.TlsSettings.Xver),
 				Handshake: option.InboundRealityHandshakeOptions{
 					ServerOptions: option.ServerOptions{
 						Server:     dest,
@@ -242,7 +246,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 			in.Type = "vless"
 			in.Options = &option.VLESSInboundOptions{
 				ListenOptions: listen,
-				Users:         buildVLESSUsers(users, n.Flow),
 				InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
 					TLS: &tls,
 				},
@@ -253,7 +256,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 			in.Type = "vmess"
 			in.Options = &option.VMessInboundOptions{
 				ListenOptions: listen,
-				Users:         buildVMessUsers(users),
 				InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
 					TLS: &tls,
 				},
@@ -264,15 +266,30 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 	case "shadowsocks":
 		in.Type = "shadowsocks"
 		n := info.Shadowsocks
+		var keyLength int
+		switch n.Cipher {
+		case "2022-blake3-aes-128-gcm":
+			keyLength = 16
+		case "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305":
+			keyLength = 32
+		default:
+			keyLength = 16
+		}
 		ssoption := &option.ShadowsocksInboundOptions{
 			ListenOptions: listen,
 			Method:        n.Cipher,
-			Users:         buildShadowsocksUsers(users, n.Cipher),
 			Multiplex:     multiplex,
 		}
+		p := make([]byte, keyLength)
+		_, _ = rand.Read(p)
+		randomPasswd := string(p)
 		if strings.Contains(n.Cipher, "2022") {
 			ssoption.Password = n.ServerKey
+			randomPasswd = base64.StdEncoding.EncodeToString([]byte(randomPasswd))
 		}
+		ssoption.Users = []option.ShadowsocksUser{{
+			Password: randomPasswd,
+		}}
 		in.Options = ssoption
 	case "trojan":
 		n := info.Trojan
@@ -331,7 +348,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 		in.Type = "trojan"
 		trojanoption := &option.TrojanInboundOptions{
 			ListenOptions: listen,
-			Users:         buildTrojanUsers(users),
 			InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
 				TLS: &tls,
 			},
@@ -360,7 +376,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 		tls.ALPN = append(tls.ALPN, "h3")
 		in.Options = &option.TUICInboundOptions{
 			ListenOptions:     listen,
-			Users:             buildTUICUsers(users),
 			CongestionControl: info.Tuic.CongestionControl,
 			ZeroRTTHandshake:  info.Tuic.ZeroRTTHandshake,
 			InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
@@ -379,7 +394,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 		}
 		in.Options = &option.AnyTLSInboundOptions{
 			ListenOptions: listen,
-			Users:         buildAnyTLSUsers(users),
 			PaddingScheme: paddingScheme,
 			InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
 				TLS: &tls,
@@ -409,7 +423,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 			UpMbps:        info.Hysteria.UpMbps,
 			DownMbps:      info.Hysteria.DownMbps,
 			Obfs:          info.Hysteria.Obfs,
-			Users:         buildHysteriaUsers(users),
 			InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
 				TLS: &tls,
 			},
@@ -434,7 +447,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options, users 
 			DownMbps:              info.Hysteria2.DownMbps,
 			IgnoreClientBandwidth: info.Hysteria2.Ignore_Client_Bandwidth,
 			Obfs:                  obfs,
-			Users:                 buildHysteria2Users(users),
 			InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
 				TLS: &tls,
 			},
@@ -449,7 +461,24 @@ func (b *Sing) AddNode(tag string, info *panel.NodeInfo, config *conf.Options) e
 		return nil
 	}
 
-	return b.addSingNode(tag, info, config)
+	inboundOptions, err := getInboundOptions(tag, info, config, nil)
+	if err != nil {
+		return err
+	}
+	in := b.box.Inbound()
+	err = in.Create(
+		b.ctx,
+		b.box.Router(),
+		b.logFactory.NewLogger(F.ToString("inbound/", inboundOptions.Type, "[", tag, "]")),
+		tag,
+		inboundOptions.Type,
+		inboundOptions.Options,
+	)
+
+	if err != nil {
+		return fmt.Errorf("add inbound error: %s", err)
+	}
+	return nil
 }
 
 func (b *Sing) DelNode(tag string) error {
@@ -460,15 +489,6 @@ func (b *Sing) DelNode(tag string) error {
 		if _, found := in.Get(tag); !found {
 			return nil
 		}
-	}
-	singNode := b.deleteSingNode(tag)
-	if singNode {
-		if _, found := in.Get(tag); !found {
-			return nil
-		}
-	}
-	if _, found := in.Get(tag); !found {
-		return errors.New("the inbound not found")
 	}
 	err := in.Remove(tag)
 	if err != nil {

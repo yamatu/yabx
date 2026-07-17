@@ -21,15 +21,6 @@ func (m *fakeOnlineMap) AddIP(ip string) {
 	m.ips = append(m.ips, ip)
 }
 
-func (m *fakeOnlineMap) RemoveIP(ip string) {
-	for i, existing := range m.ips {
-		if existing == ip {
-			m.ips = append(m.ips[:i], m.ips[i+1:]...)
-			return
-		}
-	}
-}
-
 func (m *fakeOnlineMap) List() []string {
 	return append([]string(nil), m.ips...)
 }

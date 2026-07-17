@@ -7,8 +7,6 @@ BIN_NAME="V2bX"
 INSTALL_DIR="/usr/local/V2bX"
 CONFIG_DIR="/etc/V2bX"
 SERVICE_FILE="/etc/systemd/system/V2bX.service"
-REQUIRED_GO_VERSION="1.26"
-GO_INSTALL_VERSION="${V2BX_GO_VERSION:-1.26.4}"
 INSTALL_MODE="release"
 VERSION=""
 SOURCE_REF="main"
@@ -306,126 +304,16 @@ install_build_tools() {
   esac
 }
 
-version_ge() {
-  local current="${1#go}"
-  local required="$2"
-  local current_major current_minor required_major required_minor
-  IFS=. read -r current_major current_minor _ <<< "$current"
-  IFS=. read -r required_major required_minor _ <<< "$required"
-  current_major="${current_major:-0}"
-  current_minor="${current_minor:-0}"
-  required_major="${required_major:-0}"
-  required_minor="${required_minor:-0}"
-  if (( current_major > required_major )); then
-    return 0
-  fi
-  if (( current_major == required_major && current_minor >= required_minor )); then
-    return 0
-  fi
-  return 1
-}
-
-go_version_ok() {
-  if ! has_cmd go; then
-    return 1
-  fi
-  local current
-  current="$(go env GOVERSION 2>/dev/null || true)"
-  if [[ -z "$current" ]]; then
-    current="$(go version 2>/dev/null | awk '{print $3}' || true)"
-  fi
-  [[ -n "$current" ]] && version_ge "$current" "$REQUIRED_GO_VERSION"
-}
-
-detect_go_arch() {
-  local arch
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64|x64|amd64) printf 'amd64' ;;
-    i386|i686) printf '386' ;;
-    aarch64|arm64) printf 'arm64' ;;
-    armv6l|armv7l|armv6|armv7) printf 'armv6l' ;;
-    ppc64le) printf 'ppc64le' ;;
-    riscv64) printf 'riscv64' ;;
-    s390x) printf 's390x' ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-install_go_toolchain() {
-  local go_arch
-  local url
-  local archive
-  local base_dir
-  local go_root
-  local tmp_dir
-
-  if ! go_arch="$(detect_go_arch)"; then
-    log_error "Go ${REQUIRED_GO_VERSION}+ is required, but this architecture is not supported by the automatic Go installer."
-    log_error "Please install Go ${REQUIRED_GO_VERSION}+ manually or provide it in PATH."
-    exit 1
-  fi
-
-  base_dir="/usr/local/lib/v2bx-go"
-  go_root="${base_dir}/go${GO_INSTALL_VERSION}"
-  if [[ -x "${go_root}/bin/go" ]]; then
-    export PATH="${go_root}/bin:${PATH}"
-    if go_version_ok; then
-      log_info "Using cached Go toolchain: ${go_root}"
-      return
-    fi
-  fi
-
-  archive="$(mktemp /tmp/v2bx-go.XXXXXX.tar.gz)"
-  tmp_dir="$(mktemp -d /tmp/v2bx-go.XXXXXX)"
-  url="https://go.dev/dl/go${GO_INSTALL_VERSION}.linux-${go_arch}.tar.gz"
-  log_info "Downloading Go toolchain: ${url}"
-  if ! download_file "$url" "$archive"; then
-    rm -f "$archive"
-    rm -rf "$tmp_dir"
-    log_error "Failed to download Go ${GO_INSTALL_VERSION}. Please install Go ${REQUIRED_GO_VERSION}+ manually."
-    exit 1
-  fi
-
-  mkdir -p "$base_dir"
-  rm -rf "$go_root"
-  tar -C "$tmp_dir" -xzf "$archive"
-  mv "$tmp_dir/go" "$go_root"
-  rm -f "$archive"
-  rm -rf "$tmp_dir"
-  export PATH="${go_root}/bin:${PATH}"
-
-  if ! go_version_ok; then
-    log_error "Installed Go toolchain is still below ${REQUIRED_GO_VERSION}"
-    exit 1
-  fi
-}
-
-ensure_go_toolchain() {
-  if go_version_ok; then
-    log_info "Go toolchain is ready: $(go version)"
-    export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
-    return
-  fi
-  log_warn "Go ${REQUIRED_GO_VERSION}+ is required for source builds"
-  install_go_toolchain
-  export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
-  log_info "Go toolchain is ready: $(go version)"
-}
-
 install_from_source() {
   local ref="$1"
   local src_dir
   local build_tags
 
-  build_tags="${V2BX_BUILD_TAGS:-xray sing hysteria2 with_quic with_grpc with_utls with_wireguard with_acme}"
+  build_tags="${V2BX_BUILD_TAGS:-xray sing with_reality_server with_quic with_grpc with_utls with_wireguard with_acme}"
   src_dir="$(mktemp -d /tmp/v2bx-src.XXXXXX)"
 
   log_info "Installing from source ref: ${ref}"
   install_build_tools
-  ensure_go_toolchain
 
   if ! git clone --depth 1 "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" "$src_dir"; then
     rm -rf "$src_dir"
@@ -452,7 +340,7 @@ install_from_source() {
   chmod +x "$INSTALL_DIR/$BIN_NAME"
 
   if [[ -d "$src_dir/example" ]]; then
-    for file in config.json dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json config_hysteria2.json geoip.dat geosite.dat; do
+    for file in config.json dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json geoip.dat geosite.dat; do
       if [[ -f "$src_dir/example/$file" ]]; then
         cp -f "$src_dir/example/$file" "$INSTALL_DIR/$file"
       fi
@@ -544,7 +432,6 @@ install_assets() {
 
   ensure_example_asset "$ref" "config_xhttp_reality.json"
   ensure_example_asset "$ref" "config_naive.json"
-  ensure_example_asset "$ref" "config_hysteria2.json"
 
   if [[ -f "$INSTALL_DIR/geoip.dat" ]]; then
     cp -f "$INSTALL_DIR/geoip.dat" "$CONFIG_DIR/geoip.dat"
@@ -560,7 +447,6 @@ install_assets() {
   copy_if_missing "$INSTALL_DIR/custom_inbound.json" "$CONFIG_DIR/custom_inbound.json"
   copy_if_missing "$INSTALL_DIR/config_xhttp_reality.json" "$CONFIG_DIR/config_xhttp_reality.json"
   copy_if_missing "$INSTALL_DIR/config_naive.json" "$CONFIG_DIR/config_naive.json"
-  copy_if_missing "$INSTALL_DIR/config_hysteria2.json" "$CONFIG_DIR/config_hysteria2.json"
 
   if [[ ! -f "$CONFIG_DIR/xhttp_template.conf" ]]; then
     if [[ -f "$INSTALL_DIR/xhttp_template.conf" ]]; then
@@ -688,7 +574,7 @@ main() {
     fi
   else
     log_warn "First install detected. Edit /etc/V2bX/config.json before starting service."
-    log_warn "Examples: /etc/V2bX/config_xhttp_reality.json /etc/V2bX/config_naive.json /etc/V2bX/config_hysteria2.json /etc/V2bX/xhttp_template.conf"
+    log_warn "Examples: /etc/V2bX/config_xhttp_reality.json /etc/V2bX/config_naive.json /etc/V2bX/xhttp_template.conf"
     log_info "Start command: systemctl start V2bX"
   fi
 

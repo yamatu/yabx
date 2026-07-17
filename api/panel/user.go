@@ -120,9 +120,6 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				SetHeader("If-None-Match", c.userEtag).
 				ForceContentType("application/json").
 				Get(path)
-			if err = c.checkResponse(r, path, err); err != nil {
-				return nil, err
-			}
 			if r == nil || r.RawResponse == nil {
 				return nil, fmt.Errorf("received nil response or raw response")
 			}
@@ -132,6 +129,9 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				return nil, nil
 			}
 
+			if err = c.checkResponse(r, path, err); err != nil {
+				return nil, err
+			}
 			userlist := &UserListBody{}
 			if err := json.Unmarshal(r.Body(), userlist); err != nil {
 				return nil, fmt.Errorf("unmarshal user list error: %w", err)
@@ -147,9 +147,6 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				SetHeader("If-None-Match", c.userEtag).
 				ForceContentType("application/json").
 				Get(path)
-			if err = c.checkResponse(r, path, err); err != nil {
-				return nil, err
-			}
 			if r == nil || r.RawResponse == nil {
 				return nil, fmt.Errorf("received nil response or raw response")
 			}
@@ -159,6 +156,9 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 				return nil, nil
 			}
 
+			if err = c.checkResponse(r, path, err); err != nil {
+				return nil, err
+			}
 			userlist := &UserListBody{}
 			if err := json.Unmarshal(r.Body(), userlist); err != nil {
 				return nil, fmt.Errorf("unmarshal user list error: %w", err)
@@ -288,14 +288,8 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 	}
 
 	idPayload := make(map[string][]string, len(payload))
-	onlinePayload := make(map[string]int, len(payload))
 	for uid, ips := range payload {
-		if len(ips) == 0 {
-			continue
-		}
-		key := strconv.Itoa(uid)
-		idPayload[key] = ips
-		onlinePayload[key] = len(ips)
+		idPayload[strconv.Itoa(uid)] = ips
 	}
 
 	uidToUUID := make(map[int]string)
@@ -347,14 +341,6 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 		}
 		return fmt.Errorf("report online users failed on %s", c.assembleURL(path))
 	default:
-		reportPayload := map[string]interface{}{
-			"alive":  idPayload,
-			"online": onlinePayload,
-		}
-		if err := post("/api/v2/server/report", reportPayload); err == nil {
-			return nil
-		}
-
 		paths := []string{
 			"/api/v1/server/UniProxy/alive",
 			"/api/v2/server/alive",

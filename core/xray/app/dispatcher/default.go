@@ -347,9 +347,9 @@ func (d *DefaultDispatcher) shouldOverride(ctx context.Context, result SniffResu
 	if domain == "" {
 		return false
 	}
-	for _, excludedDomain := range request.ExcludeForDomain {
-		if strings.HasPrefix(excludedDomain, "regexp:") {
-			pattern := excludedDomain[7:]
+	for _, d := range request.ExcludeForDomain {
+		if strings.HasPrefix(d, "regexp:") {
+			pattern := d[7:]
 			re, err := regexp.Compile(pattern)
 			if err != nil {
 				errors.LogInfo(ctx, "Unable to compile regex")
@@ -358,8 +358,10 @@ func (d *DefaultDispatcher) shouldOverride(ctx context.Context, result SniffResu
 			if re.MatchString(domain) {
 				return false
 			}
-		} else if strings.ToLower(domain) == excludedDomain {
-			return false
+		} else {
+			if strings.ToLower(domain) == d {
+				return false
+			}
 		}
 	}
 	protocolString := result.Protocol()
