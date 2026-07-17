@@ -30,12 +30,16 @@ func (m *fakeOnlineMap) RemoveIP(ip string) {
 	}
 }
 
-func (m *fakeOnlineMap) ForEach(visitor func(string, int64) bool) {
+func (m *fakeOnlineMap) List() []string {
+	return append([]string(nil), m.ips...)
+}
+
+func (m *fakeOnlineMap) IpTimeMap() map[string]time.Time {
+	result := make(map[string]time.Time, len(m.ips))
 	for _, ip := range m.ips {
-		if !visitor(ip, time.Now().Unix()) {
-			return
-		}
+		result[ip] = time.Now()
 	}
+	return result
 }
 
 type fakeStatsManager struct {
@@ -46,10 +50,9 @@ func (m *fakeStatsManager) Type() interface{} { return statsFeature.ManagerType(
 func (m *fakeStatsManager) Start() error      { return nil }
 func (m *fakeStatsManager) Close() error      { return nil }
 
-func (m *fakeStatsManager) RegisterCounter(string) (statsFeature.Counter, error)  { return nil, nil }
-func (m *fakeStatsManager) UnregisterCounter(string) error                        { return nil }
-func (m *fakeStatsManager) GetCounter(string) statsFeature.Counter                { return nil }
-func (m *fakeStatsManager) VisitCounters(func(string, statsFeature.Counter) bool) {}
+func (m *fakeStatsManager) RegisterCounter(string) (statsFeature.Counter, error) { return nil, nil }
+func (m *fakeStatsManager) UnregisterCounter(string) error                       { return nil }
+func (m *fakeStatsManager) GetCounter(string) statsFeature.Counter               { return nil }
 
 func (m *fakeStatsManager) RegisterOnlineMap(name string) (statsFeature.OnlineMap, error) {
 	om := &fakeOnlineMap{}
@@ -72,19 +75,9 @@ func (m *fakeStatsManager) GetOnlineMap(name string) statsFeature.OnlineMap {
 	return m.onlineMaps[name]
 }
 
-func (m *fakeStatsManager) VisitOnlineMaps(visitor func(string, statsFeature.OnlineMap) bool) {
-	for name, onlineMap := range m.onlineMaps {
-		if !visitor(name, onlineMap) {
-			return
-		}
-	}
-}
-
 func (m *fakeStatsManager) RegisterChannel(string) (statsFeature.Channel, error) { return nil, nil }
 func (m *fakeStatsManager) UnregisterChannel(string) error                       { return nil }
 func (m *fakeStatsManager) GetChannel(string) statsFeature.Channel               { return nil }
-
-func (m *fakeStatsManager) GetAllOnlineUsers() []string { return nil }
 
 func TestGetOnlineUsersFromStatsManager(t *testing.T) {
 	tag := "test-node"

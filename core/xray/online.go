@@ -32,18 +32,17 @@ func (c *Xray) GetOnlineUsers(tag string, users []panel.UserInfo) ([]panel.Onlin
 		}
 
 		seen := make(map[string]struct{})
-		onlineMap.ForEach(func(ip string, _ int64) bool {
+		for _, ip := range onlineMap.List() {
 			ip = netutil.NormalizeIP(ip)
 			if ip == "" {
-				return true
+				continue
 			}
 			if _, ok := seen[ip]; ok {
-				return true
+				continue
 			}
 			seen[ip] = struct{}{}
 			onlineUsers = append(onlineUsers, panel.OnlineUser{UID: user.Id, IP: ip})
-			return true
-		})
+		}
 	}
 
 	sort.Slice(onlineUsers, func(i, j int) bool {
