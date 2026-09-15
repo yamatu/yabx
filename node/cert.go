@@ -71,6 +71,25 @@ func (c *Controller) requestCert() error {
 	return nil
 }
 
+// writePemFile writes one PEM block, replacing the file content.
+//
+// The file is closed: generateSelfSslCertificate used to open the certificate and
+// the key and leave both handles open (the second assignment leaked the first
+// one). On Windows an open handle also made the file undeletable, which is how
+// the leaked node/1.pem showed up in the working tree.
+func writePemFile(path, blockType string, der []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	return pem.Encode(f, &pem.Block{
+		Type:  blockType,
+		Bytes: der,
+	})
+}
+
 func generateSelfSslCertificate(domain, certPath, keyPath string) error {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	tmpl := &x509.Certificate{
@@ -90,27 +109,8 @@ func generateSelfSslCertificate(domain, certPath, keyPath string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(certPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
+	if err = writePemFile(certPath, "CERTIFICATE", cert); err != nil {
 		return err
 	}
-	err = pem.Encode(f, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: cert,
-	})
-	if err != nil {
-		return err
-	}
-	f, err = os.OpenFile(keyPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return err
-	}
-	err = pem.Encode(f, &pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
-	if err != nil {
-		return err
-	}
-	return nil
+	return writePemFile(keyPath, "EC PRIVATE KEY", x509.MarshalPKCS1PrivateKey(key))
 }

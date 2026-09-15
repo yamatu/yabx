@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/InazumaV/V2bX/conf"
-	"github.com/goccy/go-json"
 	"github.com/go-resty/resty/v2"
+	"github.com/goccy/go-json"
 )
 
 var client *Client

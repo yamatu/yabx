@@ -10,6 +10,11 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// reloadDelay is how long the watcher waits before reading the file again, so a
+// config tool that is still writing is not read half way. It is a variable so a
+// test does not have to wait five seconds per reload.
+var reloadDelay = 5 * time.Second
+
 func (p *Conf) Watch(filePath, xDnsPath string, sDnsPath string, reload func()) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -29,7 +34,7 @@ func (p *Conf) Watch(filePath, xDnsPath string, sDnsPath string, reload func()) 
 				}
 				pre = time.Now()
 				go func() {
-					time.Sleep(5 * time.Second)
+					time.Sleep(reloadDelay)
 					switch filepath.Base(strings.TrimSuffix(e.Name, "~")) {
 					case filepath.Base(xDnsPath), filepath.Base(sDnsPath):
 						log.Println("DNS file changed, reloading...")
