@@ -2,10 +2,15 @@ package panel
 
 import (
 	"log"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/InazumaV/V2bX/conf"
 	"github.com/goccy/go-json"
+	"github.com/go-resty/resty/v2"
 )
 
 var client *Client
@@ -227,5 +232,104 @@ func TestMergeECHSettingsFromTopLevelNodeConfig(t *testing.T) {
 	}
 	if merged.ServerKeys != "CAkKCw==" {
 		t.Fatalf("merged.ServerKeys = %q, want %q", merged.ServerKeys, "CAkKCw==")
+	}
+}
+
+// TestIntervalToTimeHandlesLoosePanelValues guards the panic that used to take
+// the whole process down: panels may send the push/pull interval as a number, a
+// string or omit the field entirely (nil), and the old implementation called
+// reflect.TypeOf(i).Kind() on the raw value.
+func TestIntervalToTimeHandlesLoosePanelValues(t *testing.T) {
+	tests := []struct {
+		name string
+		in   interface{}
+		want time.Duration
+	}{
+		{name: "missing value", in: nil, want: 0},
+		{name: "int", in: 60, want: 60 * time.Second},
+		{name: "int64", in: int64(90), want: 90 * time.Second},
+		{name: "json number", in: float64(120), want: 120 * time.Second},
+		{name: "string", in: "45", want: 45 * time.Second},
+		{name: "padded string", in: " 45 ", want: 45 * time.Second},
+		{name: "unparsable string", in: "1m", want: 0},
+		{name: "bool", in: true, want: 0},
+		{name: "slice", in: []interface{}{1}, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := intervalToTime(tt.in); got != tt.want {
+				t.Fatalf("intervalToTime(%#v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetNodeInfoCachesUntilInvalidated documents the contract the node monitor
+// relies on to retry a reload: the panel config is only returned once, and only
+// InvalidateNodeConfigCache makes it available again after a failed reload.
+func TestGetNodeInfoCachesUntilInvalidated(t *testing.T) {
+	const body = `{
+		"protocol": "vmess",
+		"base_config": {"push_interval": 60, "pull_interval": 90},
+		"server_port": 443,
+		"network": "tcp"
+	}`
+
+	var requests int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		if r.URL.Path != "/api/v1/server/UniProxy/config" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("If-None-Match") == `"config-1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"config-1"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		client:   resty.New().SetBaseURL(srv.URL),
+		APIHost:  srv.URL,
+		NodeType: "vmess",
+		NodeId:   1,
+		UserList: &UserListBody{},
+		AliveMap: &AliveMap{},
+	}
+
+	node, err := c.GetNodeInfo()
+	if err != nil {
+		t.Fatalf("first GetNodeInfo: %v", err)
+	}
+	if node == nil {
+		t.Fatal("first GetNodeInfo returned nil, want the node config")
+	}
+	if node.PushInterval != 60*time.Second || node.PullInterval != 90*time.Second {
+		t.Fatalf("intervals = %v/%v, want 1m0s/1m30s", node.PushInterval, node.PullInterval)
+	}
+
+	node, err = c.GetNodeInfo()
+	if err != nil {
+		t.Fatalf("second GetNodeInfo: %v", err)
+	}
+	if node != nil {
+		t.Fatal("second GetNodeInfo returned the config again, want the cached 304")
+	}
+
+	c.InvalidateNodeConfigCache()
+	node, err = c.GetNodeInfo()
+	if err != nil {
+		t.Fatalf("GetNodeInfo after invalidate: %v", err)
+	}
+	if node == nil {
+		t.Fatal("GetNodeInfo after invalidate returned nil, failed reloads would never be retried")
+	}
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
 	}
 }

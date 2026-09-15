@@ -36,6 +36,16 @@ func (c *Controller) normalizedPushInterval(interval time.Duration) time.Duratio
 	return interval
 }
 
+// retryNodeReload forgets the cached node config so the next pull returns it
+// again. Without it a half applied reload is never retried: the panel answers
+// 304 (ETag match) or the exact same body hash from then on, and the node would
+// stay on the previous configuration until an admin changes something else.
+func (c *Controller) retryNodeReload() {
+	if c.apiClient != nil {
+		c.apiClient.InvalidateNodeConfigCache()
+	}
+}
+
 // applyOnlineTTL keeps the online-device window strictly longer than the panel
 // push interval, otherwise a device could be dropped between two reports and
 // make the reported online count flap.
@@ -203,20 +213,24 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		c.resetTraffic()
 		// Remove old node
 		log.WithField("tag", c.tag).Info("Node changed, reload")
-		err = c.server.DelNode(c.tag)
-		if err != nil {
+
+		// A node that is already gone is not an error: the new one is registered
+		// right below, and aborting here would drop the reload entirely.
+		if err = c.server.DelNode(c.tag); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Panic("Delete node failed")
-			return nil
+			}).Error("Delete node failed")
 		}
 
 		// Update limiter
 		if len(c.Options.Name) == 0 {
+			oldTag := c.tag
 			c.tag = c.buildNodeTag(newN)
-			// Remove Old limiter
-			limiter.DeleteLimiter(c.tag)
+			// Remove the limiter of the OLD tag. Deleting with the freshly built
+			// tag leaked the previous limiter (and its online registry) on every
+			// reload, and those leaks were swept once a minute forever.
+			limiter.DeleteLimiter(oldTag)
 			// Add new Limiter
 			l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, newA)
 			c.limiter = l
@@ -226,45 +240,45 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			c.limiter.SetAliveList(newA)
 		}
 		// Update rule
-		err = c.limiter.UpdateRule(&newN.Rules)
-		if err != nil {
+		if err = c.limiter.UpdateRule(&newN.Rules); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
 			}).Error("Update Rule failed")
+			c.retryNodeReload()
 			return nil
 		}
 
 		// check cert
 		if newN.Security == panel.Tls {
-			err = c.requestCert()
-			if err != nil {
+			if err = c.requestCert(); err != nil {
 				log.WithFields(log.Fields{
 					"tag": c.tag,
 					"err": err,
 				}).Error("Request cert failed")
+				c.retryNodeReload()
 				return nil
 			}
 		}
 		// add new node
-		err = c.server.AddNode(c.tag, newN, c.Options)
-		if err != nil {
+		if err = c.server.AddNode(c.tag, newN, c.Options); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Panic("Add node failed")
+			}).Error("Add node failed, retrying on the next pull")
+			c.retryNodeReload()
 			return nil
 		}
-		_, err = c.server.AddUsers(&vCore.AddUsersParams{
+		if _, err = c.server.AddUsers(&vCore.AddUsersParams{
 			Tag:      c.tag,
 			Users:    c.userList,
 			NodeInfo: newN,
-		})
-		if err != nil {
+		}); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
 			}).Error("Add users failed")
+			c.retryNodeReload()
 			return nil
 		}
 		// Check interval
@@ -290,8 +304,10 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	if newA != nil {
 		c.limiter.SetAliveList(newA)
 	}
-	// node no changed, check users
-	if len(newU) == 0 {
+	// node no changed, check users.
+	// GetUserList returns nil for "not modified" (304), so an empty but non nil
+	// list means the node lost every user and the core must drop them as well.
+	if newU == nil {
 		return nil
 	}
 	deleted, added := compareUserList(c.userList, newU)

@@ -1,6 +1,7 @@
 package hy2
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/InazumaV/V2bX/api/panel"
@@ -26,10 +27,10 @@ func (h *Hysteria2) AddNode(tag string, info *panel.NodeInfo, config *conf.Optio
 	if len(config.Hysteria2ConfigPath) != 0 {
 		v.SetConfigFile(config.Hysteria2ConfigPath)
 		if err := v.ReadInConfig(); err != nil {
-			h.Logger.Fatal("failed to read server config", zap.Error(err))
+			return fmt.Errorf("failed to read hysteria2 server config: %w", err)
 		}
 		if err := v.Unmarshal(&c); err != nil {
-			h.Logger.Fatal("failed to parse server config", zap.Error(err))
+			return fmt.Errorf("failed to parse hysteria2 server config: %w", err)
 		}
 	}
 	n := Hysteria2node{
@@ -55,7 +56,7 @@ func (h *Hysteria2) AddNode(tag string, info *panel.NodeInfo, config *conf.Optio
 		return err
 	}
 	n.Hy2server = s
-	h.Hy2nodes[tag] = n
+	h.setNode(tag, n)
 	go func() {
 		if err := s.Serve(); err != nil {
 			if !strings.Contains(err.Error(), "quic: server closed") {
@@ -67,10 +68,13 @@ func (h *Hysteria2) AddNode(tag string, info *panel.NodeInfo, config *conf.Optio
 }
 
 func (h *Hysteria2) DelNode(tag string) error {
-	err := h.Hy2nodes[tag].Hy2server.Close()
-	if err != nil {
+	n, ok := h.getNode(tag)
+	if !ok {
+		return fmt.Errorf("node %s not found", tag)
+	}
+	if err := n.Hy2server.Close(); err != nil {
 		return err
 	}
-	delete(h.Hy2nodes, tag)
+	h.deleteNode(tag)
 	return nil
 }

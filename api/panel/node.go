@@ -369,6 +369,15 @@ type NodeStatus struct {
 	DiskUsed  uint64
 }
 
+// InvalidateNodeConfigCache drops the cached node config (ETag + body hash) so
+// that the next GetNodeInfo returns the configuration again even if the panel
+// would report "not modified". It is used to retry a reload that failed half way
+// through instead of silently keeping the previous configuration forever.
+func (c *Client) InvalidateNodeConfigCache() {
+	c.nodeEtag = ""
+	c.responseBodyHash = ""
+}
+
 func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 	switch c.PanelType {
 	case "ppanel":
@@ -414,8 +423,12 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 				return nil, fmt.Errorf("decode node params error: %s", err)
 			}
 			// set interval
-			node.PushInterval = intervalToTime(node.Basic.PushInterval)
-			node.PullInterval = intervalToTime(node.Basic.PullInterval)
+			// Basic is optional in the panel response: a nil pointer here used to
+			// crash the whole node process.
+			if node.Basic != nil {
+				node.PushInterval = intervalToTime(node.Basic.PushInterval)
+				node.PullInterval = intervalToTime(node.Basic.PullInterval)
+			}
 			node.Type = node.Protocol
 			switch node.Protocol {
 			case "vmess", "vless":
@@ -625,6 +638,10 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 				node.Security = Tls
 			}
 
+			if cm == nil {
+				return nil, fmt.Errorf("unsupported node type: %s", c.NodeType)
+			}
+
 			// parse rules and dns
 			for i := range cm.Routes {
 				var matchs []string
@@ -666,8 +683,12 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 			}
 
 			// set interval
-			node.PushInterval = intervalToTime(cm.BaseConfig.PushInterval)
-			node.PullInterval = intervalToTime(cm.BaseConfig.PullInterval)
+			// base_config is optional: reading through a nil pointer crashed the
+			// node process whenever a panel omitted it.
+			if cm.BaseConfig != nil {
+				node.PushInterval = intervalToTime(cm.BaseConfig.PushInterval)
+				node.PullInterval = intervalToTime(cm.BaseConfig.PullInterval)
+			}
 
 			node.Common = cm
 			// clear
@@ -681,17 +702,43 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 
 }
 
+// intervalToTime converts the loosely typed panel interval field to a duration.
+//
+// Panels send it as a JSON number, a JSON string or omit it entirely (null), so
+// every case must be handled: the previous implementation called
+// reflect.TypeOf(i).Kind() unconditionally and panicked on a nil value, which
+// took the whole process down.
 func intervalToTime(i interface{}) time.Duration {
-	switch reflect.TypeOf(i).Kind() {
-	case reflect.Int:
-		return time.Duration(i.(int)) * time.Second
-	case reflect.String:
-		i, _ := strconv.Atoi(i.(string))
-		return time.Duration(i) * time.Second
-	case reflect.Float64:
-		return time.Duration(i.(float64)) * time.Second
+	if i == nil {
+		return 0
+	}
+
+	switch v := i.(type) {
+	case int:
+		return time.Duration(v) * time.Second
+	case int64:
+		return time.Duration(v) * time.Second
+	case float64:
+		return time.Duration(v) * time.Second
+	case float32:
+		return time.Duration(v) * time.Second
+	case string:
+		seconds, _ := strconv.Atoi(strings.TrimSpace(v))
+		return time.Duration(seconds) * time.Second
+	}
+
+	// Fall back to reflection for the remaining integer kinds, and never panic
+	// on an unexpected type.
+	rv := reflect.ValueOf(i)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return time.Duration(rv.Int()) * time.Second
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return time.Duration(rv.Uint()) * time.Second
+	case reflect.Float32, reflect.Float64:
+		return time.Duration(rv.Float()) * time.Second
 	default:
-		return time.Duration(reflect.ValueOf(i).Int()) * time.Second
+		return 0
 	}
 }
 

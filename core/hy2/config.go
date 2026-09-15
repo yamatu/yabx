@@ -437,7 +437,9 @@ func runMasqTCPServer(s *masq.MasqTCPServer, httpAddr, httpsAddr string, logger 
 	}
 	err := <-errChan
 	if err != nil {
-		logger.Fatal("failed to serve masquerade HTTP(S)", zap.Error(err))
+		// The masquerade server is optional: never take the whole node down when
+		// it cannot listen (port taken, bad address, ...).
+		logger.Error("failed to serve masquerade HTTP(S)", zap.Error(err))
 	}
 }
 
