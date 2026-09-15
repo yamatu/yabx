@@ -67,6 +67,50 @@ func (c *ConnLimiter) SetOnlineTTL(ttl time.Duration) {
 	c.onlineTTL.Store(int64(ttl))
 }
 
+// storeIP records a connection of ip in the user's ip map and reports whether
+// the ip limit rejects it instead.
+func (c *ConnLimiter) storeIP(ips *sync.Map, ip string, isTcp bool) (limit bool) {
+	if online, ok := ips.Load(ip); ok {
+		// online ip
+		if c.realtime {
+			if isTcp {
+				// tcp count add
+				ips.Store(ip, online.(int)+2)
+			}
+		} else {
+			// update connect time for not realtime
+			ips.Store(ip, time.Now())
+		}
+		return false
+	}
+
+	// not online ip
+	if c.ipLimit > 0 {
+		cn := 0
+		ips.Range(func(_, _ interface{}) bool {
+			cn++
+			if cn >= c.ipLimit {
+				limit = true
+				return false
+			}
+			return true
+		})
+		if limit {
+			return true
+		}
+	}
+	if c.realtime {
+		if isTcp {
+			ips.Store(ip, 2)
+		} else {
+			ips.Store(ip, 1)
+		}
+	} else {
+		ips.Store(ip, time.Now())
+	}
+	return false
+}
+
 func (c *ConnLimiter) AddConnCount(user string, ip string, isTcp bool) (limit bool) {
 	if c.connLimit != 0 {
 		if v, ok := c.count.Load(user); ok && v.(int) >= c.connLimit {
@@ -75,65 +119,31 @@ func (c *ConnLimiter) AddConnCount(user string, ip string, isTcp bool) (limit bo
 		}
 		c.addConnCount(user, isTcp)
 	}
-	// first user map
-	ipMap := new(sync.Map)
-	if c.realtime {
-		if isTcp {
-			ipMap.Store(ip, 2)
-		} else {
-			ipMap.Store(ip, 1)
-		}
+
+	// The ip map is shared by every connection of the user, so it is only built
+	// for a user that does not have one yet. The previous code allocated a
+	// sync.Map for every connection and threw it away in LoadOrStore.
+	var ips *sync.Map
+	if v, ok := c.ip.Load(user); ok {
+		ips = v.(*sync.Map)
 	} else {
-		ipMap.Store(ip, time.Now())
-	}
-	// check user online ip
-	if v, ok := c.ip.LoadOrStore(user, ipMap); ok {
-		// have user
-		ips := v.(*sync.Map)
-		if online, ok := ips.Load(ip); ok {
-			// online ip
-			if c.realtime {
-				if isTcp {
-					// tcp count add
-					ips.Store(ip, online.(int)+2)
-				}
-			} else {
-				// update connect time for not realtime
-				ips.Store(ip, time.Now())
-			}
+		fresh := new(sync.Map)
+		if v, loaded := c.ip.LoadOrStore(user, fresh); loaded {
+			ips = v.(*sync.Map)
 		} else {
-			// not online ip
-			if c.ipLimit > 0 {
-				cn := 0
-				ips.Range(func(_, _ interface{}) bool {
-					cn++
-					if cn >= c.ipLimit {
-						limit = true
-						return false
-					}
-					return true
-				})
-				if limit {
-					// Over the ip limit: this connection is rejected, so the tcp
-					// connection count added above must be rolled back. Leaking it
-					// made the counter grow on every rejected connection until the
-					// user was locked out for good ("Limited by ip or conn").
-					c.delConnCount(user)
-					return
-				}
-			}
-			if c.realtime {
-				if isTcp {
-					ips.Store(ip, 2)
-				} else {
-					ips.Store(ip, 1)
-				}
-			} else {
-				ips.Store(ip, time.Now())
-			}
+			ips = fresh
 		}
 	}
-	return
+
+	if c.storeIP(ips, ip, isTcp) {
+		// Over the ip limit: this connection is rejected, so the tcp connection
+		// count added above must be rolled back. Leaking it made the counter grow
+		// on every rejected connection until the user was locked out for good
+		// ("Limited by ip or conn").
+		c.delConnCount(user)
+		return true
+	}
+	return false
 }
 
 // DelConnCount Delete tcp connection count, no tcp do not use

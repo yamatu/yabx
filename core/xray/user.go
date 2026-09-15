@@ -48,10 +48,9 @@ func (c *Xray) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo) e
 }
 
 func (c *Xray) GetUserTraffic(tag, uuid string, reset bool) (up int64, down int64) {
-	upName := "user>>>" + format.UserTag(tag, uuid) + ">>>traffic>>>uplink"
-	downName := "user>>>" + format.UserTag(tag, uuid) + ">>>traffic>>>downlink"
-	upCounter := c.shm.GetCounter(upName)
-	downCounter := c.shm.GetCounter(downName)
+	taguuid := format.UserTag(tag, uuid)
+	upCounter := c.shm.GetCounter("user>>>" + taguuid + ">>>traffic>>>uplink")
+	downCounter := c.shm.GetCounter("user>>>" + taguuid + ">>>traffic>>>downlink")
 	if reset {
 		if upCounter != nil {
 			up = upCounter.Set(0)
@@ -71,14 +70,15 @@ func (c *Xray) GetUserTraffic(tag, uuid string, reset bool) (up int64, down int6
 }
 
 func (c *Xray) RestoreUserTraffic(tag, uuid string, up, down int64) {
+	taguuid := format.UserTag(tag, uuid)
 	// Add is atomic, so usage that arrives while the report is retried is kept.
 	if up > 0 {
-		if counter := c.shm.GetCounter("user>>>" + format.UserTag(tag, uuid) + ">>>traffic>>>uplink"); counter != nil {
+		if counter := c.shm.GetCounter("user>>>" + taguuid + ">>>traffic>>>uplink"); counter != nil {
 			counter.Add(up)
 		}
 	}
 	if down > 0 {
-		if counter := c.shm.GetCounter("user>>>" + format.UserTag(tag, uuid) + ">>>traffic>>>downlink"); counter != nil {
+		if counter := c.shm.GetCounter("user>>>" + taguuid + ">>>traffic>>>downlink"); counter != nil {
 			counter.Add(down)
 		}
 	}

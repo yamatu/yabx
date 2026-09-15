@@ -24,21 +24,46 @@ func TestConnLimiter_DelConnCount(t *testing.T) {
 	t.Log(c.AddConnCount("1", "2", true))
 }
 
+// ipValueOf returns the stored value of a user ip entry.
+func ipValueOf(l *ConnLimiter, user, ip string) (any, bool) {
+	if v, ok := l.ip.Load(user); ok {
+		return v.(*sync.Map).Load(ip)
+	}
+	return nil, false
+}
+
+// TestConnLimiter_ClearOnlineIP checks both modes of the sweep. It used to sleep
+// for a full minute to let a non realtime entry expire; the ttl is configurable,
+// so the same path is covered without the wait.
 func TestConnLimiter_ClearOnlineIP(t *testing.T) {
-	t.Log(c.AddConnCount("1", "1", false))
-	t.Log(c.AddConnCount("1", "2", false))
-	c.ClearOnlineIP()
-	t.Log(c.AddConnCount("1", "2", true))
-	c.DelConnCount("1", "2")
-	t.Log(c.AddConnCount("1", "1", false))
-	// not realtime
-	c.realtime = false
-	t.Log(c.AddConnCount("3", "2", true))
-	c.ClearOnlineIP()
-	t.Log(c.ip.Load("3"))
-	time.Sleep(time.Minute)
-	c.ClearOnlineIP()
-	t.Log(c.ip.Load("3"))
+	// A permissive ip limit: this test is about the sweep, not the limit.
+	l := NewConnLimiter(10, 10, true, time.Minute)
+
+	// Realtime: a packet protocol ip (udp/icmp, counter 1) is dropped, a tcp ip
+	// (counter 2) is kept.
+	l.AddConnCount("1", "1", false)
+	l.AddConnCount("1", "2", true)
+	l.ClearOnlineIP()
+	if v, ok := ipValueOf(l, "1", "1"); ok {
+		t.Errorf("packet online ip was kept after ClearOnlineIP: %v", v)
+	}
+	if v, ok := ipValueOf(l, "1", "2"); !ok || v.(int) != 2 {
+		t.Errorf("tcp online ip = %v (found %v), want 2", v, ok)
+	}
+
+	// Not realtime: the entry expires with the online ttl.
+	l.SetOnlineTTL(20 * time.Millisecond)
+	l.realtime = false
+	l.AddConnCount("3", "2", true)
+	l.ClearOnlineIP()
+	if _, ok := ipValueOf(l, "3", "2"); !ok {
+		t.Error("online ip expired before its ttl")
+	}
+	time.Sleep(40 * time.Millisecond)
+	l.ClearOnlineIP()
+	if v, ok := ipValueOf(l, "3", "2"); ok {
+		t.Errorf("expired online ip was not cleared: %v", v)
+	}
 }
 
 func BenchmarkConnLimiter(b *testing.B) {
@@ -120,5 +145,39 @@ func TestConnLimiterReleasesConnCountRealtime(t *testing.T) {
 	}
 	if l.AddConnCount("user", "1.1.1.1", true) {
 		t.Fatal("a new connection must be accepted after the previous one closed")
+	}
+}
+
+// TestConnLimiterReusesTheUserIPMap guards the per connection allocation: the
+// user ip map must be reused (and the tcp counter accumulated inside it), not
+// rebuilt for every connection.
+func TestConnLimiterReusesTheUserIPMap(t *testing.T) {
+	l := NewConnLimiter(10, 10, true, time.Minute)
+
+	l.AddConnCount("u", "1.1.1.1", true)
+	first, ok := l.ip.Load("u")
+	if !ok {
+		t.Fatal("no ip map stored for the user")
+	}
+	l.AddConnCount("u", "1.1.1.1", true)
+	second, _ := l.ip.Load("u")
+	if first.(*sync.Map) != second.(*sync.Map) {
+		t.Error("the user ip map was replaced by the second connection")
+	}
+	if v, ok := ipValueOf(l, "u", "1.1.1.1"); !ok || v.(int) != 4 {
+		t.Errorf("tcp ip counter = %v (found %v), want 4", v, ok)
+	}
+
+	// The ip limit still rejects the connection that would exceed it and rolls
+	// the connection counter back.
+	l = NewConnLimiter(10, 1, true, time.Minute)
+	if limit := l.AddConnCount("u", "1.1.1.1", true); limit {
+		t.Fatal("the first ip was rejected")
+	}
+	if limit := l.AddConnCount("u", "2.2.2.2", true); !limit {
+		t.Error("the second ip was not rejected")
+	}
+	if n := countOf(l, "u"); n != 1 {
+		t.Errorf("conn count after a rejected ip = %d, want 1", n)
 	}
 }

@@ -26,33 +26,28 @@ func (v *V2bX) Authenticate(addr net.Addr, auth string, tx uint64) (ok bool, id 
 	return false, ""
 }
 
+// AddUsers and DelUsers update the shared user map in one pass.
+//
+// Every user used to be written by its own goroutine, which for a node with
+// thousands of users meant thousands of goroutines (and a WaitGroup) competing
+// for the same mutex to do a single map write.
 func (h *Hysteria2) AddUsers(p *vCore.AddUsersParams) (added int, err error) {
-	var wg sync.WaitGroup
+	h.Auth.mutex.Lock()
+	defer h.Auth.mutex.Unlock()
+
 	for _, user := range p.Users {
-		wg.Add(1)
-		go func(u panel.UserInfo) {
-			defer wg.Done()
-			h.Auth.mutex.Lock()
-			h.Auth.usersMap[u.Uuid] = u.Id
-			h.Auth.mutex.Unlock()
-		}(user)
+		h.Auth.usersMap[user.Uuid] = user.Id
 	}
-	wg.Wait()
 	return len(p.Users), nil
 }
 
 func (h *Hysteria2) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo) error {
-	var wg sync.WaitGroup
+	h.Auth.mutex.Lock()
+	defer h.Auth.mutex.Unlock()
+
 	for _, user := range users {
-		wg.Add(1)
-		go func(u panel.UserInfo) {
-			defer wg.Done()
-			h.Auth.mutex.Lock()
-			delete(h.Auth.usersMap, u.Uuid)
-			h.Auth.mutex.Unlock()
-		}(user)
+		delete(h.Auth.usersMap, user.Uuid)
 	}
-	wg.Wait()
 	return nil
 }
 
