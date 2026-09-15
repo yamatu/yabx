@@ -2,6 +2,7 @@ package limiter
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -11,18 +12,32 @@ type ConnLimiter struct {
 	realtime  bool
 	ipLimit   int
 	connLimit int
+	onlineTTL atomic.Int64
 	count     sync.Map // map[string]int
 	ip        sync.Map // map[string]map[string]int
 }
 
-func NewConnLimiter(conn int, ip int, realtime bool) *ConnLimiter {
-	return &ConnLimiter{
+func NewConnLimiter(conn int, ip int, realtime bool, onlineTTL time.Duration) *ConnLimiter {
+	if onlineTTL <= 0 {
+		onlineTTL = nonRealtimeOnlineTTL
+	}
+	c := &ConnLimiter{
 		realtime:  realtime,
 		connLimit: conn,
 		ipLimit:   ip,
 		count:     sync.Map{},
 		ip:        sync.Map{},
 	}
+	c.onlineTTL.Store(int64(onlineTTL))
+	return c
+}
+
+// SetOnlineTTL updates the non-realtime online window.
+func (c *ConnLimiter) SetOnlineTTL(ttl time.Duration) {
+	if ttl <= 0 {
+		return
+	}
+	c.onlineTTL.Store(int64(ttl))
 }
 
 func (c *ConnLimiter) AddConnCount(user string, ip string, isTcp bool) (limit bool) {
@@ -147,7 +162,7 @@ func (c *ConnLimiter) ClearOnlineIP() {
 				return true
 			} else {
 				// clear ip for not realtime
-				if v.(time.Time).Before(time.Now().Add(-nonRealtimeOnlineTTL)) {
+				if v.(time.Time).Before(time.Now().Add(-time.Duration(c.onlineTTL.Load()))) {
 					// ttl no active
 					userIp.Delete(ip)
 					return true

@@ -71,10 +71,11 @@ func TestLimiterOnlineIPSnapshotAndAliveList(t *testing.T) {
 		t.Fatalf("expected updated alive count 2, got %d", got)
 	}
 
-	if limited := l.ConnLimiter.AddConnCount(taguuid, "1.1.1.1", true); limited {
+	// CheckLimit is the real entry point: it records the device as online.
+	if _, limited := l.CheckLimit(taguuid, "1.1.1.1", true, false); limited {
 		t.Fatal("unexpected limit on first connection")
 	}
-	if limited := l.ConnLimiter.AddConnCount(taguuid, "::ffff:1.1.1.1", true); limited {
+	if _, limited := l.CheckLimit(taguuid, "::ffff:1.1.1.1", true, false); limited {
 		t.Fatal("unexpected limit on duplicate normalized connection")
 	}
 
@@ -109,7 +110,7 @@ func TestLimiterGetOnlineIPMapReturnsSortedNormalizedIPs(t *testing.T) {
 	}}, nil)
 
 	for _, ip := range []string{"2.2.2.2", "::ffff:1.1.1.1", "1.1.1.1"} {
-		if limited := l.ConnLimiter.AddConnCount(taguuid, ip, true); limited {
+		if _, limited := l.CheckLimit(taguuid, ip, true, false); limited {
 			t.Fatalf("unexpected limit for ip %s", ip)
 		}
 	}

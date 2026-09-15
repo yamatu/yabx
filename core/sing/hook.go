@@ -79,7 +79,10 @@ func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapte
 		t = c.(*counter.TrafficCounter)
 	}
 	conn = counter.NewConnCounter(conn, t.GetCounter(m.User))
-	return conn
+	// Reference-count the online device for the whole life of the connection so
+	// long lived connections stay online and disappear shortly after Close.
+	l.Online.Add(taguuid, ip, l.UserID(taguuid))
+	return newTrackedConn(conn, func() { l.Online.Del(taguuid, ip) })
 }
 
 func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
@@ -127,5 +130,38 @@ func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn
 		t = c.(*counter.TrafficCounter)
 	}
 	conn = counter.NewPacketConnCounter(conn, t.GetCounter(m.User))
-	return conn
+	l.Online.Add(taguuid, ip, l.UserID(taguuid))
+	return newTrackedPacketConn(conn, func() { l.Online.Del(taguuid, ip) })
+}
+
+type trackedConn struct {
+	net.Conn
+	once    sync.Once
+	onClose func()
+}
+
+func newTrackedConn(conn net.Conn, onClose func()) net.Conn {
+	return &trackedConn{Conn: conn, onClose: onClose}
+}
+
+func (c *trackedConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.onClose)
+	return err
+}
+
+type trackedPacketConn struct {
+	N.PacketConn
+	once    sync.Once
+	onClose func()
+}
+
+func newTrackedPacketConn(conn N.PacketConn, onClose func()) N.PacketConn {
+	return &trackedPacketConn{PacketConn: conn, onClose: onClose}
+}
+
+func (c *trackedPacketConn) Close() error {
+	err := c.PacketConn.Close()
+	c.once.Do(c.onClose)
+	return err
 }

@@ -123,7 +123,12 @@
       // 限制器相关配置
       "LimitConfig": {
         // 开启实时连接数及IP数限制
-        "EnableRealtime": false,
+        // 建议开启：节点上报的在线设备数会随连接关闭实时减少
+        "EnableRealtime": true,
+
+        // 离线设备保留在在线列表中的时间（秒，默认 300）
+        // 会自动调整到大于面板推送间隔，避免两次上报之间设备掉线导致在线数抖动
+        "OnlineTimeout": 300,
 
         // 用户速度限制
         "SpeedLimit": 0,

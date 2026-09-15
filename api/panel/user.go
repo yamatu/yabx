@@ -341,6 +341,11 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 		}
 		return fmt.Errorf("report online users failed on %s", c.assembleURL(path))
 	default:
+		// XBoard / v2board expect the raw {"<uid>": ["<ip>", ...]} body:
+		// UniProxyController::alive decodes the raw request body and passes it to
+		// ServerService::processAlive, which casts each key to int. A wrapped
+		// body ({"alive": {...}}) or uuid keys would therefore be read as uid 0
+		// and pollute user_devices:0, so only the uid keyed payload is sent.
 		paths := []string{
 			"/api/v1/server/UniProxy/alive",
 			"/api/v2/server/alive",
@@ -353,23 +358,6 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 				return nil
 			} else {
 				lastErr = err
-			}
-			if err := post(path, idWrapper); err == nil {
-				return nil
-			} else {
-				lastErr = err
-			}
-			if len(mixedPayload) != len(idPayload) {
-				if err := post(path, mixedPayload); err == nil {
-					return nil
-				} else {
-					lastErr = err
-				}
-				if err := post(path, mixedWrapper); err == nil {
-					return nil
-				} else {
-					lastErr = err
-				}
 			}
 		}
 		return lastErr

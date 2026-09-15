@@ -27,6 +27,26 @@ func (c *Controller) normalizedPushInterval(interval time.Duration) time.Duratio
 	return interval
 }
 
+// applyOnlineTTL keeps the online-device window strictly longer than the panel
+// push interval, otherwise a device could be dropped between two reports and
+// make the reported online count flap.
+func (c *Controller) applyOnlineTTL(pushInterval time.Duration) {
+	if c.limiter == nil {
+		return
+	}
+	ttl := time.Duration(c.LimitConfig.OnlineTimeout) * time.Second
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	if minimum := pushInterval + time.Minute; ttl < minimum {
+		log.WithField("tag", c.tag).Warnf(
+			"OnlineTimeout %s is not greater than the push interval %s, raising it to %s",
+			ttl, pushInterval, minimum)
+		ttl = minimum
+	}
+	c.limiter.SetOnlineTTL(ttl)
+}
+
 func (c *Controller) dynamicSpeedLimitEnabled() bool {
 	return c.LimitConfig.EnableDynamicSpeedLimit && c.LimitConfig.DynamicSpeedLimitConfig != nil
 }
@@ -95,6 +115,7 @@ func (c *Controller) ensureOnlineIPSyncTask() {
 
 func (c *Controller) startTasks(node *panel.NodeInfo) {
 	pushInterval := c.normalizedPushInterval(node.PushInterval)
+	c.applyOnlineTTL(pushInterval)
 
 	// fetch node info task
 	c.nodeInfoMonitorPeriodic = &task.Task{
@@ -250,6 +271,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			c.userReportPeriodic.Close()
 			_ = c.userReportPeriodic.Start(true)
 		}
+		c.applyOnlineTTL(newPushInterval)
 		c.ensureOnlineIPSyncTask()
 		log.WithField("tag", c.tag).Infof("Added %d new users", len(c.userList))
 		// exit

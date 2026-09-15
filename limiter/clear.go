@@ -8,6 +8,7 @@ func ClearOnlineIP() error {
 	limitLock.RLock()
 	for _, l := range limiter {
 		l.ConnLimiter.ClearOnlineIP()
+		l.Online.Sweep()
 	}
 	limitLock.RUnlock()
 	log.WithField("Type", "Limiter").

@@ -5,6 +5,10 @@ type LimitConfig struct {
 	SpeedLimit              int                      `json:"SpeedLimit"`
 	IPLimit                 int                      `json:"DeviceLimit"`
 	ConnLimit               int                      `json:"ConnLimit"`
+	// OnlineTimeout is how long an offline device is still remembered as online,
+	// in seconds. 0 falls back to 300s. It is automatically raised when it would
+	// be shorter than the panel push interval.
+	OnlineTimeout           int                      `json:"OnlineTimeout"`
 	EnableIpRecorder        bool                     `json:"EnableIpRecorder"`
 	IpRecorderConfig        *IpReportConfig          `json:"IpRecorderConfig"`
 	EnableDynamicSpeedLimit bool                     `json:"EnableDynamicSpeedLimit"`

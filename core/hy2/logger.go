@@ -51,19 +51,26 @@ func (l *serverLogger) Connect(addr net.Addr, uuid string, tx uint64) {
 	if err != nil {
 		l.logger.Panic("Get limiter error", zap.String("tag", l.Tag), zap.Error(err))
 	}
-	if _, r := limiterinfo.CheckLimit(format.UserTag(l.Tag, uuid), extractIPFromAddr(addr), addr.Network() == "tcp", true); r {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(l.Tag, uuid)); ok {
+	taguuid := format.UserTag(l.Tag, uuid)
+	ip := extractIPFromAddr(addr)
+	if _, r := limiterinfo.CheckLimit(taguuid, ip, addr.Network() == "tcp", true); r {
+		if userLimit, ok := limiterinfo.UserLimitInfo.Load(taguuid); ok {
 			userLimit.(*limiter.UserLimitInfo).OverLimit = true
 		}
 	} else {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(l.Tag, uuid)); ok {
+		if userLimit, ok := limiterinfo.UserLimitInfo.Load(taguuid); ok {
 			userLimit.(*limiter.UserLimitInfo).OverLimit = false
 		}
+		// One hysteria2 client connection equals one device.
+		limiterinfo.Online.Add(taguuid, ip, limiterinfo.UserID(taguuid))
 	}
 	l.logger.Info("client connected", zap.String("addr", addr.String()), zap.String("uuid", uuid), zap.Uint64("tx", tx))
 }
 
 func (l *serverLogger) Disconnect(addr net.Addr, uuid string, err error) {
+	if limiterinfo, lerr := limiter.GetLimiter(l.Tag); lerr == nil {
+		limiterinfo.Online.Del(format.UserTag(l.Tag, uuid), extractIPFromAddr(addr))
+	}
 	l.logger.Info("client disconnected", zap.String("addr", addr.String()), zap.String("uuid", uuid), zap.Error(err))
 }
 

@@ -49,9 +49,31 @@ func TestDedupeOnlineUsersByIP(t *testing.T) {
 	}
 
 	got := dedupeOnlineUsersByIP(input)
+	// Dedup is scoped per (uid, ip): different users on the same exit IP must
+	// all stay online.
 	want := []panel.OnlineUser{
 		{UID: 1, IP: "1.1.1.1"},
 		{UID: 2, IP: "2.2.2.2"},
+		{UID: 3, IP: "2.2.2.2"},
+		{UID: 5, IP: "1.1.1.1"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected deduped online users: got=%v want=%v", got, want)
+	}
+}
+
+func TestDedupeOnlineUsersByIPKeepsSharedIPForEachUser(t *testing.T) {
+	input := []panel.OnlineUser{
+		{UID: 1, IP: "1.2.3.4"},
+		{UID: 2, IP: "1.2.3.4"},
+		{UID: 1, IP: "::ffff:1.2.3.4"},
+	}
+
+	got := dedupeOnlineUsersByIP(input)
+	want := []panel.OnlineUser{
+		{UID: 1, IP: "1.2.3.4"},
+		{UID: 2, IP: "1.2.3.4"},
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -69,8 +91,8 @@ func TestDedupeOnlineIPMapByIP(t *testing.T) {
 	got := dedupeOnlineIPMapByIP(input)
 	want := map[int][]string{
 		1: {"1.1.1.1", "2.2.2.2"},
-		2: {"3.3.3.3"},
-		3: {"4.4.4.4"},
+		2: {"2.2.2.2", "3.3.3.3"},
+		3: {"3.3.3.3", "4.4.4.4"},
 	}
 
 	if !reflect.DeepEqual(got, want) {

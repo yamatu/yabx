@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/InazumaV/V2bX/common/netutil"
 	"github.com/InazumaV/V2bX/common/rate"
 	"github.com/InazumaV/V2bX/limiter"
 
@@ -552,14 +553,11 @@ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool, netw
 func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.Link, destination net.Destination, l *limiter.Limiter, protocol string) {
 	sessionInbound := session.InboundFromContext(ctx)
 	if sessionInbound.User != nil {
-		if l != nil {
-			// del connect count
-			if destination.Network == net.Network_TCP {
-				defer func() {
-					l.ConnLimiter.DelConnCount(sessionInbound.User.Email, sourceIPString(sessionInbound))
-				}()
-			}
-		} else {
+		taguuid := sessionInbound.User.Email
+		// Normalize once so ConnLimiter and the online registry use the exact
+		// same key as the CheckLimit call in getLink.
+		userIP := netutil.NormalizeIP(sourceIPString(sessionInbound))
+		if l == nil {
 			var err error
 			l, err = limiter.GetLimiter(sessionInbound.Tag)
 			if err != nil {
@@ -567,6 +565,16 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 			}
 		}
 		if l != nil {
+			// Reference-count the online device for the whole life of this
+			// connection: while the connection is open the device can never
+			// expire, and it is dropped right after the last connection closes.
+			l.Online.Add(taguuid, userIP, l.UserID(taguuid))
+			defer func() {
+				l.Online.Del(taguuid, userIP)
+				if destination.Network == net.Network_TCP {
+					l.ConnLimiter.DelConnCount(taguuid, userIP)
+				}
+			}()
 			var destStr string
 			if destination.Address.Family().IsDomain() {
 				destStr = destination.Address.Domain()

@@ -21,13 +21,13 @@ var limiter map[string]*Limiter
 func Init() {
 	limiter = map[string]*Limiter{}
 	c := task.Periodic{
-		Interval: time.Minute * 3,
+		Interval: time.Minute,
 		Execute:  ClearOnlineIP,
 	}
 	go func() {
 		log.WithField("Type", "Limiter").
 			Debug("ClearOnlineIP started")
-		time.Sleep(time.Minute * 3)
+		time.Sleep(time.Minute)
 		_ = c.Start()
 	}()
 }
@@ -42,6 +42,7 @@ type Limiter struct {
 	UserLimitInfo *sync.Map      // Key: Uid value: UserLimitInfo
 	ConnLimiter   *ConnLimiter   // Key: Uid value: ConnLimiter
 	SpeedLimiter  *sync.Map      // key: Uid, value: *speedBucket
+	Online        *OnlineRegistry
 	aliveMu       sync.RWMutex
 	AliveList     map[int]int // Key: Uid, value: alive_ip
 }
@@ -65,8 +66,9 @@ func AddLimiter(tag string, l *conf.LimitConfig, users []panel.UserInfo, aliveLi
 		SpeedLimit:    l.SpeedLimit,
 		UserOnlineIP:  new(sync.Map),
 		UserLimitInfo: new(sync.Map),
-		ConnLimiter:   NewConnLimiter(l.ConnLimit, l.IPLimit, l.EnableRealtime),
+		ConnLimiter:   NewConnLimiter(l.ConnLimit, l.IPLimit, l.EnableRealtime, onlineTTLFromSeconds(l.OnlineTimeout)),
 		SpeedLimiter:  new(sync.Map),
+		Online:        newOnlineRegistry(onlineTTLFromSeconds(l.OnlineTimeout)),
 		AliveList:     make(map[int]int),
 		OldUserOnline: new(sync.Map),
 	}
@@ -118,6 +120,7 @@ func (l *Limiter) UpdateUser(tag string, added []panel.UserInfo, deleted []panel
 		l.SpeedLimiter.Delete(format.UserTag(tag, deleted[i].Uuid))
 		delete(l.UUIDtoUID, deleted[i].Uuid)
 		l.DeleteAlive(deleted[i].Id)
+		l.Online.DeleteUser(format.UserTag(tag, deleted[i].Uuid))
 	}
 	for i := range added {
 		userLimit := &UserLimitInfo{
@@ -173,7 +176,34 @@ func (l *Limiter) GetAlive(uid int) int {
 	return l.AliveList[uid]
 }
 
+// UserID resolves the panel uid bound to a "tag|uuid" key.
+func (l *Limiter) UserID(taguuid string) int {
+	if v, ok := l.UserLimitInfo.Load(taguuid); ok {
+		return v.(*UserLimitInfo).UID
+	}
+	return 0
+}
+
+// SetOnlineTTL updates how long an unreferenced online device is remembered.
+// Cores that call Add/Del keep referenced devices online regardless of the TTL.
+func (l *Limiter) SetOnlineTTL(ttl time.Duration) {
+	l.Online.SetTTL(ttl)
+	l.ConnLimiter.SetOnlineTTL(ttl)
+}
+
+// CheckLimit enforces speed/conn/device limits and records the device as online.
 func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool) (Bucket *ratelimit.Bucket, Reject bool) {
+	bucket, reject := l.checkLimit(taguuid, ip, isTcp, noSSUDP)
+	if !reject {
+		// A device is online as soon as one of its connections passes the
+		// limits. Cores with a connection lifecycle additionally reference-count
+		// the entry via Online.Add/Online.Del.
+		l.Online.Touch(taguuid, ip, l.UserID(taguuid))
+	}
+	return bucket, reject
+}
+
+func (l *Limiter) checkLimit(taguuid string, ip string, isTcp bool, noSSUDP bool) (Bucket *ratelimit.Bucket, Reject bool) {
 	ip = netutil.NormalizeIP(ip)
 
 	// ip and conn limiter
@@ -251,56 +281,8 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 	}
 }
 
-func (l *Limiter) snapshotOnlineUsers() []panel.OnlineUser {
-	onlineUser := make([]panel.OnlineUser, 0)
-	type onlineKey struct {
-		uid int
-		ip  string
-	}
-	seen := make(map[onlineKey]struct{})
-
-	l.ConnLimiter.ip.Range(func(key, value interface{}) bool {
-		taguuid, ok := key.(string)
-		if !ok {
-			return true
-		}
-		ipMap, ok := value.(*sync.Map)
-		if !ok {
-			return true
-		}
-		v, ok := l.UserLimitInfo.Load(taguuid)
-		if !ok {
-			return true
-		}
-		uid := v.(*UserLimitInfo).UID
-		if uid == 0 {
-			return true
-		}
-		ipMap.Range(func(key, _ interface{}) bool {
-			ip, ok := key.(string)
-			if !ok {
-				return true
-			}
-			ip = netutil.NormalizeIP(ip)
-			if ip == "" {
-				return true
-			}
-			k := onlineKey{uid: uid, ip: ip}
-			if _, exists := seen[k]; exists {
-				return true
-			}
-			seen[k] = struct{}{}
-			onlineUser = append(onlineUser, panel.OnlineUser{UID: uid, IP: ip})
-			return true
-		})
-		return true
-	})
-
-	return onlineUser
-}
-
 func (l *Limiter) GetOnlineDevice() (*[]panel.OnlineUser, error) {
-	onlineUser := l.snapshotOnlineUsers()
+	onlineUser := l.Online.Snapshot()
 
 	// Keep old behavior for device-limit window cleanup.
 	l.UserOnlineIP.Range(func(key, value interface{}) bool {
@@ -323,7 +305,7 @@ func (l *Limiter) GetOnlineDevice() (*[]panel.OnlineUser, error) {
 }
 
 func (l *Limiter) GetOnlineIPMap() (map[int][]string, error) {
-	onlineUser := l.snapshotOnlineUsers()
+	onlineUser := l.Online.Snapshot()
 	data := make(map[int][]string)
 	for _, onlineuser := range onlineUser {
 		data[onlineuser.UID] = append(data[onlineuser.UID], onlineuser.IP)

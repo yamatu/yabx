@@ -31,7 +31,8 @@
       "EnableDNS": true,
       "DomainStrategy": "ipv4_only",
       "LimitConfig": {
-        "EnableRealtime": false,
+        "EnableRealtime": true,
+        "OnlineTimeout": 300,
         "SpeedLimit": 0,
         "IPLimit": 0,
         "ConnLimit": 0,
