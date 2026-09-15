@@ -349,8 +349,6 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 		paths := []string{
 			"/api/v1/server/UniProxy/alive",
 			"/api/v2/server/alive",
-			"/api/v1/server/online",
-			"/api/v2/server/online",
 		}
 		var lastErr error
 		for _, path := range paths {
@@ -360,6 +358,17 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 				lastErr = err
 			}
 		}
+
+		// Newer XBoard merged the node report endpoints into a single
+		// POST /api/v2/server/report that reads the device map from the "alive"
+		// field and also accepts traffic/online/status/metrics. Keep it as a
+		// forward compatible fallback for panels that dropped the V1 alive route.
+		if err := post("/api/v2/server/report", map[string]map[string][]string{"alive": idPayload}); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+
 		return lastErr
 	}
 

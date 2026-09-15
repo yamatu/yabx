@@ -57,6 +57,20 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		}
 		data := buildOnlineIPPayload(result, c.userList)
 
+		// XBoard's /alive only writes the devices it receives: a user that is no
+		// longer reported keeps the previous online_count / user_devices entry
+		// until the panel side TTL (300s) or the cleanup command (10min) kicks in.
+		// Explicitly submit an empty device list for users that just went offline
+		// (setDevices(uid, node, [])) so the panel recomputes online_count and the
+		// per user online state on the next report.
+		cleared := 0
+		if c.apiClient.PanelType != "ppanel" {
+			for _, uid := range c.trackOnlineTransition(result) {
+				data[uid] = []string{}
+				cleared++
+			}
+		}
+
 		// XBoard node online count is based on /push payload count.
 		// Include zero-traffic online users for non-ppanel to keep node online count aligned with online users.
 		if c.apiClient.PanelType != "ppanel" {
@@ -75,7 +89,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 				"err": err,
 			}).Info("Report online users failed")
 		} else {
-			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", len(onlineDevice), len(result))
+			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported, %d Cleared", len(onlineDevice), len(result), cleared)
 		}
 	}
 
@@ -153,6 +167,35 @@ func (c *Controller) syncOnlineUsersTask() error {
 	c.aliveMap = aliveMap
 	c.limiter.SetAliveList(aliveMap)
 	return nil
+}
+
+// trackOnlineTransition remembers which uids were reported online in the
+// previous cycle and returns the ones that are no longer online.
+//
+// The result is used to submit an explicit empty device list for those users so
+// the panel drops their stale online state immediately instead of waiting for
+// its own TTL (XBoard keeps user_devices for 300s and only resets online_count
+// from its cleanup command after 10 minutes).
+func (c *Controller) trackOnlineTransition(current []panel.OnlineUser) []int {
+	next := make(map[int]struct{}, len(current))
+	for _, u := range current {
+		if u.UID > 0 {
+			next[u.UID] = struct{}{}
+		}
+	}
+
+	c.onlineMu.Lock()
+	defer c.onlineMu.Unlock()
+
+	stale := make([]int, 0)
+	for uid := range c.lastOnlineUIDs {
+		if _, ok := next[uid]; !ok {
+			stale = append(stale, uid)
+		}
+	}
+	sort.Ints(stale)
+	c.lastOnlineUIDs = next
+	return stale
 }
 
 // dedupeOnlineUsersByIP removes duplicate (uid, ip) pairs.

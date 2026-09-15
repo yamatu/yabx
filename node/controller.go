@@ -22,6 +22,8 @@ type Controller struct {
 	traffic                   map[string]int64
 	userList                  []panel.UserInfo
 	aliveMap                  map[int]int
+	onlineMu                  sync.Mutex
+	lastOnlineUIDs            map[int]struct{}
 	info                      *panel.NodeInfo
 	nodeInfoMonitorPeriodic   *task.Task
 	userReportPeriodic        *task.Task
@@ -34,9 +36,10 @@ type Controller struct {
 // NewController return a Node controller with default parameters.
 func NewController(server vCore.Core, api *panel.Client, config *conf.Options) *Controller {
 	controller := &Controller{
-		server:    server,
-		Options:   config,
-		apiClient: api,
+		server:         server,
+		Options:        config,
+		apiClient:      api,
+		lastOnlineUIDs: make(map[int]struct{}),
 	}
 	return controller
 }

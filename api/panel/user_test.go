@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -69,6 +70,57 @@ func TestReportNodeOnlineUsersDefaultOnlySendsRawUIDPayload(t *testing.T) {
 		if _, ok := decoded["42"]; !ok {
 			t.Fatalf("body %d is missing the uid keyed payload: %s", i, body)
 		}
+	}
+}
+
+func TestReportNodeOnlineUsersFallsBackToV2Report(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		paths   []string
+		success string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/api/v1/server/UniProxy/alive", "/api/v2/server/alive":
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		mu.Lock()
+		success = string(body)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newOnlineTestClient(srv.URL, "Xboard")
+	data := map[int][]string{42: {"1.1.1.1"}, 7: {}}
+	if err := c.ReportNodeOnlineUsers(&data); err != nil {
+		t.Fatalf("ReportNodeOnlineUsers: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 3 || paths[2] != "/api/v2/server/report" {
+		t.Fatalf("unexpected path order: %v", paths)
+	}
+
+	// The merged XBoard endpoint reads the device map from the "alive" field,
+	// and an empty list must be preserved so the panel clears stale devices.
+	var decoded struct {
+		Alive map[string][]string `json:"alive"`
+	}
+	if err := json.Unmarshal([]byte(success), &decoded); err != nil {
+		t.Fatalf("body is not valid JSON: %v (%s)", err, success)
+	}
+	if got := decoded.Alive["42"]; !reflect.DeepEqual(got, []string{"1.1.1.1"}) {
+		t.Fatalf("alive[42] = %v, want [1.1.1.1]", got)
+	}
+	if ips, ok := decoded.Alive["7"]; !ok || len(ips) != 0 {
+		t.Fatalf("alive[7] = %v (present=%v), want an explicit empty list", ips, ok)
 	}
 }
 

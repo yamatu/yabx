@@ -100,6 +100,47 @@ func TestDedupeOnlineIPMapByIP(t *testing.T) {
 	}
 }
 
+func TestTrackOnlineTransitionReportsOfflineUsers(t *testing.T) {
+	c := &Controller{lastOnlineUIDs: make(map[int]struct{})}
+
+	// First cycle: 1 and 2 are online, nothing to clear.
+	if stale := c.trackOnlineTransition([]panel.OnlineUser{{UID: 1, IP: "1.1.1.1"}, {UID: 2, IP: "2.2.2.2"}}); len(stale) != 0 {
+		t.Fatalf("first cycle should not clear anyone, got %v", stale)
+	}
+
+	// Second cycle: user 2 went offline, user 3 came online.
+	stale := c.trackOnlineTransition([]panel.OnlineUser{{UID: 1, IP: "1.1.1.1"}, {UID: 3, IP: "3.3.3.3"}})
+	if !reflect.DeepEqual(stale, []int{2}) {
+		t.Fatalf("expected user 2 to be cleared, got %v", stale)
+	}
+
+	// Third cycle: the same offline user must not be reported twice.
+	if stale := c.trackOnlineTransition([]panel.OnlineUser{{UID: 1, IP: "1.1.1.1"}, {UID: 3, IP: "3.3.3.3"}}); len(stale) != 0 {
+		t.Fatalf("offline user should only be cleared once, got %v", stale)
+	}
+
+	// Fourth cycle: everyone offline.
+	if stale := c.trackOnlineTransition(nil); !reflect.DeepEqual(stale, []int{1, 3}) {
+		t.Fatalf("expected users 1 and 3 to be cleared, got %v", stale)
+	}
+}
+
+func TestTrackOnlineTransitionKeepsEmptyIPs(t *testing.T) {
+	c := &Controller{lastOnlineUIDs: make(map[int]struct{})}
+
+	// A user with an empty IP list still counts as online for the transition
+	// tracking, so it is not repeatedly cleared.
+	if stale := c.trackOnlineTransition([]panel.OnlineUser{{UID: 7, IP: ""}}); len(stale) != 0 {
+		t.Fatalf("first cycle should not clear anyone, got %v", stale)
+	}
+	if stale := c.trackOnlineTransition([]panel.OnlineUser{{UID: 7, IP: ""}}); len(stale) != 0 {
+		t.Fatalf("online empty-ip user should not be cleared, got %v", stale)
+	}
+	if stale := c.trackOnlineTransition(nil); !reflect.DeepEqual(stale, []int{7}) {
+		t.Fatalf("expected user 7 to be cleared, got %v", stale)
+	}
+}
+
 func TestCompareUserListDetectsDeviceLimitChanges(t *testing.T) {
 	oldUsers := []panel.UserInfo{{Id: 1, Uuid: "u1", DeviceLimit: 1}}
 	newUsers := []panel.UserInfo{{Id: 1, Uuid: "u1", DeviceLimit: 2}}
