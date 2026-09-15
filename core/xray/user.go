@@ -43,7 +43,6 @@ func (c *Xray) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo) e
 		down = "user>>>" + user + ">>>traffic>>>downlink"
 		c.shm.UnregisterCounter(up)
 		c.shm.UnregisterCounter(down)
-		c.shm.UnregisterOnlineMap(userOnlineStatName(tag, users[i].Uuid))
 	}
 	return nil
 }

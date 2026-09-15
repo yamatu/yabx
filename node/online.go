@@ -26,11 +26,3 @@ func (c *Controller) getOnlineUsers() ([]panel.OnlineUser, error) {
 
 	return *onlineUsers, nil
 }
-
-func (c *Controller) getOnlineIPMap() (map[int][]string, error) {
-	if c.limiter == nil {
-		return map[int][]string{}, nil
-	}
-
-	return c.limiter.GetOnlineIPMap()
-}

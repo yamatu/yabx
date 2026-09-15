@@ -27,8 +27,3 @@ type Core interface {
 	Protocols() []string
 	Type() string
 }
-
-type OnlineUserReporter interface {
-	GetOnlineUsers(tag string, users []panel.UserInfo) ([]panel.OnlineUser, error)
-	GetOnlineIPMap(tag string, users []panel.UserInfo) (map[int][]string, error)
-}

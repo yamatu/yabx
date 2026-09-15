@@ -49,12 +49,14 @@ func parseConnectionConfig(c *conf.XrayConnectionConfig) (policy *coreConf.Polic
 	policy = &coreConf.Policy{
 		StatsUserUplink:   true,
 		StatsUserDownlink: true,
-		StatsUserOnline:   true,
-		Handshake:         &c.Handshake,
-		ConnectionIdle:    &c.ConnIdle,
-		UplinkOnly:        &c.UplinkOnly,
-		DownlinkOnly:      &c.DownlinkOnly,
-		BufferSize:        &c.BufferSize,
+		// StatsUserOnline is left disabled: it makes the dispatcher record the
+		// client IP of every connection in a stats OnlineMap that nothing reads
+		// anymore. The online device list comes from the limiter registry.
+		Handshake:      &c.Handshake,
+		ConnectionIdle: &c.ConnIdle,
+		UplinkOnly:     &c.UplinkOnly,
+		DownlinkOnly:   &c.DownlinkOnly,
+		BufferSize:     &c.BufferSize,
 	}
 	return
 }
