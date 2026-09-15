@@ -10,6 +10,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// maxPanelPushInterval keeps the /push cycle inside the window the panel uses to
+// decide whether a user is online. XBoard marks a user as 当前在线 when
+// users.t (written by every /push) is younger than 120s, so a longer cycle made
+// an otherwise connected user flap to 最后在线时间 between two reports.
+const maxPanelPushInterval = 100 * time.Second
+
 func (c *Controller) normalizedPushInterval(interval time.Duration) time.Duration {
 	if interval <= 0 {
 		interval = 60 * time.Second
@@ -19,8 +25,11 @@ func (c *Controller) normalizedPushInterval(interval time.Duration) time.Duratio
 		if interval < 20*time.Second {
 			interval = 20 * time.Second
 		}
-		if interval > 4*time.Minute {
-			interval = 4 * time.Minute
+		if interval > maxPanelPushInterval {
+			log.WithField("tag", c.tag).Warnf(
+				"Panel push interval %s exceeds the online status window, lowering it to %s",
+				interval, maxPanelPushInterval)
+			interval = maxPanelPushInterval
 		}
 	}
 
