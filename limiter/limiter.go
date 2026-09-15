@@ -36,15 +36,35 @@ type Limiter struct {
 	DomainRules   []*regexp.Regexp
 	ProtocolRules []string
 	SpeedLimit    int
-	UserOnlineIP  *sync.Map      // Key: Name, value: {Key: Ip, value: Uid}
-	OldUserOnline *sync.Map      // Key: Ip, value: Uid
-	UUIDtoUID     map[string]int // Key: UUID, value: Uid
-	UserLimitInfo *sync.Map      // Key: Uid value: UserLimitInfo
-	ConnLimiter   *ConnLimiter   // Key: Uid value: ConnLimiter
-	SpeedLimiter  *sync.Map      // key: Uid, value: *speedBucket
+	UserOnlineIP  *sync.Map // Key: Name, value: {Key: Ip, value: Uid}
+
+	// OldUserOnline remembers which IPs were online in the previous device
+	// window (Key: Ip, value: oldOnlineEntry), so that a device that reconnects
+	// is not counted as a new device by the device limit. Entries expire after
+	// oldOnlineTTL.
+	OldUserOnline *sync.Map
+	UserLimitInfo *sync.Map    // Key: Uid value: UserLimitInfo
+	ConnLimiter   *ConnLimiter // Key: Uid value: ConnLimiter
+	SpeedLimiter  *sync.Map    // key: Uid, value: *speedBucket
 	Online        *OnlineRegistry
 	aliveMu       sync.RWMutex
 	AliveList     map[int]int // Key: Uid, value: alive_ip
+	oldOnlineTTL  time.Duration
+}
+
+// defaultOldOnlineTTL is how long an IP is remembered as "was online".
+//
+// The entry only has to survive one device window (the interval between two
+// GetOnlineDevice calls, which is the panel push interval) so that a
+// continuously online device is not counted twice. It is kept noticeably
+// longer than the panel keeps its own device list (XBoard forgets a device
+// after 300s without traffic): while the panel still counts a device, dropping
+// the entry would reject the user's own reconnection as "one device too many".
+const defaultOldOnlineTTL = 10 * time.Minute
+
+type oldOnlineEntry struct {
+	uid    int
+	seenAt time.Time
 }
 
 type speedBucket struct {
@@ -71,11 +91,10 @@ func AddLimiter(tag string, l *conf.LimitConfig, users []panel.UserInfo, aliveLi
 		Online:        newOnlineRegistry(onlineTTLFromSeconds(l.OnlineTimeout)),
 		AliveList:     make(map[int]int),
 		OldUserOnline: new(sync.Map),
+		oldOnlineTTL:  defaultOldOnlineTTL,
 	}
 	info.SetAliveList(aliveList)
-	uuidmap := make(map[string]int)
 	for i := range users {
-		uuidmap[users[i].Uuid] = users[i].Id
 		userLimit := &UserLimitInfo{}
 		userLimit.UID = users[i].Id
 		if users[i].SpeedLimit != 0 {
@@ -87,7 +106,6 @@ func AddLimiter(tag string, l *conf.LimitConfig, users []panel.UserInfo, aliveLi
 		userLimit.OverLimit = false
 		info.UserLimitInfo.Store(format.UserTag(tag, users[i].Uuid), userLimit)
 	}
-	info.UUIDtoUID = uuidmap
 	limitLock.Lock()
 	if limiter == nil {
 		limiter = map[string]*Limiter{}
@@ -118,7 +136,6 @@ func (l *Limiter) UpdateUser(tag string, added []panel.UserInfo, deleted []panel
 		l.UserLimitInfo.Delete(format.UserTag(tag, deleted[i].Uuid))
 		l.UserOnlineIP.Delete(format.UserTag(tag, deleted[i].Uuid))
 		l.SpeedLimiter.Delete(format.UserTag(tag, deleted[i].Uuid))
-		delete(l.UUIDtoUID, deleted[i].Uuid)
 		l.DeleteAlive(deleted[i].Id)
 		l.Online.DeleteUser(format.UserTag(tag, deleted[i].Uuid))
 	}
@@ -135,21 +152,74 @@ func (l *Limiter) UpdateUser(tag string, added []panel.UserInfo, deleted []panel
 		}
 		userLimit.OverLimit = false
 		l.UserLimitInfo.Store(format.UserTag(tag, added[i].Uuid), userLimit)
-		l.UUIDtoUID[added[i].Uuid] = added[i].Id
 	}
 }
 
 func (l *Limiter) UpdateDynamicSpeedLimit(tag, uuid string, limit int, expire time.Time) error {
 	taguuid := format.UserTag(tag, uuid)
-	if v, ok := l.UserLimitInfo.Load(format.UserTag(tag, uuid)); ok {
-		info := v.(*UserLimitInfo)
-		info.DynamicSpeedLimit = limit
-		info.ExpireTime = expire.Unix()
-		l.SpeedLimiter.Delete(taguuid)
-	} else {
-		return errors.New("not found")
+	if err := l.updateUserLimit(taguuid, func(u *UserLimitInfo) {
+		u.DynamicSpeedLimit = limit
+		u.ExpireTime = expire.Unix()
+	}); err != nil {
+		return err
 	}
+	l.SpeedLimiter.Delete(taguuid)
 	return nil
+}
+
+// SetOverLimit flags the user as having hit a limit, so that the traffic of the
+// rejected connections is not accounted (hysteria2 sets it on a rejected
+// connection and clears it on the next traffic log).
+func (l *Limiter) SetOverLimit(taguuid string, over bool) {
+	_ = l.updateUserLimit(taguuid, func(u *UserLimitInfo) {
+		u.OverLimit = over
+	})
+}
+
+// ConsumeOverLimit reports whether the user is over the limit and clears the
+// flag at the same time, so that only the first traffic log after a rejected
+// connection is skipped.
+func (l *Limiter) ConsumeOverLimit(taguuid string) bool {
+	for {
+		current, ok := l.UserLimitInfo.Load(taguuid)
+		if !ok {
+			return false
+		}
+		old, ok := current.(*UserLimitInfo)
+		if !ok || !old.OverLimit {
+			return false
+		}
+		updated := *old
+		updated.OverLimit = false
+		if l.UserLimitInfo.CompareAndSwap(taguuid, current, &updated) {
+			return true
+		}
+	}
+}
+
+// updateUserLimit applies mutate to a copy of the user's limit info and swaps
+// the copy in.
+//
+// The limit info is read on the connection hot path, so it is never mutated in
+// place: the panel updates it (AddUsers/AddDynamicSpeedLimit) and hysteria2
+// flips OverLimit from the connection callbacks, and a reader must never observe
+// a half written entry.
+func (l *Limiter) updateUserLimit(taguuid string, mutate func(*UserLimitInfo)) error {
+	for {
+		current, ok := l.UserLimitInfo.Load(taguuid)
+		if !ok {
+			return errors.New("not found")
+		}
+		old, ok := current.(*UserLimitInfo)
+		if !ok {
+			return errors.New("not found")
+		}
+		updated := *old
+		mutate(&updated)
+		if l.UserLimitInfo.CompareAndSwap(taguuid, current, &updated) {
+			return nil
+		}
+	}
 }
 
 func (l *Limiter) SetAliveList(aliveList map[int]int) {
@@ -179,7 +249,9 @@ func (l *Limiter) GetAlive(uid int) int {
 // UserID resolves the panel uid bound to a "tag|uuid" key.
 func (l *Limiter) UserID(taguuid string) int {
 	if v, ok := l.UserLimitInfo.Load(taguuid); ok {
-		return v.(*UserLimitInfo).UID
+		if u, ok := v.(*UserLimitInfo); ok {
+			return u.UID
+		}
 	}
 	return 0
 }
@@ -216,14 +288,21 @@ func (l *Limiter) checkLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 	deviceLimit := 0
 	var uid int
 	if v, ok := l.UserLimitInfo.Load(taguuid); ok {
-		u := v.(*UserLimitInfo)
+		u, ok := v.(*UserLimitInfo)
+		if !ok {
+			return nil, true
+		}
 		deviceLimit = u.DeviceLimit
 		uid = u.UID
 		if u.ExpireTime < time.Now().Unix() && u.ExpireTime != 0 {
 			if u.SpeedLimit != 0 {
 				userLimit = u.SpeedLimit
-				u.DynamicSpeedLimit = 0
-				u.ExpireTime = 0
+				// Drop the expired dynamic limit instead of updating the entry in
+				// place: other goroutines read it while this connection is handled.
+				_ = l.updateUserLimit(taguuid, func(u *UserLimitInfo) {
+					u.DynamicSpeedLimit = 0
+					u.ExpireTime = 0
+				})
 			} else {
 				l.UserLimitInfo.Delete(taguuid)
 			}
@@ -250,8 +329,8 @@ func (l *Limiter) checkLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 					}
 				}
 			}
-		} else if v, ok := l.OldUserOnline.Load(ip); ok {
-			if v.(int) == uid {
+		} else if seenUID, ok := l.oldOnlineLookup(ip); ok {
+			if seenUID == uid {
 				l.OldUserOnline.Delete(ip)
 			}
 		} else {
@@ -284,24 +363,79 @@ func (l *Limiter) checkLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 func (l *Limiter) GetOnlineDevice() (*[]panel.OnlineUser, error) {
 	onlineUser := l.Online.Snapshot()
 
-	// Keep old behavior for device-limit window cleanup.
+	l.rotateDeviceWindow()
+
+	return &onlineUser, nil
+}
+
+// rotateDeviceWindow starts a new device window: the devices of the window that
+// just ended are remembered in OldUserOnline (so checkLimit does not count a
+// reconnecting device as a new one) and UserOnlineIP is cleared.
+//
+// GetOnlineDevice calls this on every push cycle, which is what defines the
+// window; checkLimit depends on it being called regularly.
+func (l *Limiter) rotateDeviceWindow() {
+	now := time.Now()
 	l.UserOnlineIP.Range(func(key, value interface{}) bool {
 		taguuid := key.(string)
-		ipMap := value.(*sync.Map)
+		ipMap, ok := value.(*sync.Map)
+		if !ok {
+			return true
+		}
 		ipMap.Range(func(key, value interface{}) bool {
-			uid := value.(int)
+			uid, ok := value.(int)
+			if !ok {
+				return true
+			}
 			ip := netutil.NormalizeIP(key.(string))
 			if ip == "" {
 				return true
 			}
-			l.OldUserOnline.Store(ip, uid)
+			l.OldUserOnline.Store(ip, oldOnlineEntry{uid: uid, seenAt: now})
 			return true
 		})
-		l.UserOnlineIP.Delete(taguuid) // Reset online device
+		l.UserOnlineIP.Delete(taguuid)
 		return true
 	})
+}
 
-	return &onlineUser, nil
+// oldOnlineLookup returns the uid last seen online from ip, if that IP was
+// recorded inside the device window.
+func (l *Limiter) oldOnlineLookup(ip string) (int, bool) {
+	value, ok := l.OldUserOnline.Load(ip)
+	if !ok {
+		return 0, false
+	}
+	entry, ok := value.(oldOnlineEntry)
+	if !ok || l.oldOnlineExpired(entry, time.Now()) {
+		l.OldUserOnline.Delete(ip)
+		return 0, false
+	}
+	return entry.uid, true
+}
+
+func (l *Limiter) oldOnlineExpired(entry oldOnlineEntry, now time.Time) bool {
+	return now.Sub(entry.seenAt) > l.oldOnlineTTLValue()
+}
+
+func (l *Limiter) oldOnlineTTLValue() time.Duration {
+	if l.oldOnlineTTL <= 0 {
+		return defaultOldOnlineTTL
+	}
+	return l.oldOnlineTTL
+}
+
+// sweepOldOnline drops the IPs that were not seen online for a whole device
+// window. Without it the map would grow with every client IP the node ever saw.
+func (l *Limiter) sweepOldOnline() {
+	now := time.Now()
+	l.OldUserOnline.Range(func(key, value interface{}) bool {
+		entry, ok := value.(oldOnlineEntry)
+		if !ok || l.oldOnlineExpired(entry, now) {
+			l.OldUserOnline.Delete(key)
+		}
+		return true
+	})
 }
 
 func (l *Limiter) GetOnlineIPMap() (map[int][]string, error) {

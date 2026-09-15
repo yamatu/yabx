@@ -35,13 +35,8 @@ func (h *HookServer) LogTraffic(id string, tx, rx uint64) (ok bool) {
 		return false
 	}
 
-	userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(h.Tag, id))
-	if ok {
-		userlimitInfo := userLimit.(*limiter.UserLimitInfo)
-		if userlimitInfo.OverLimit {
-			userlimitInfo.OverLimit = false
-			return false
-		}
+	if limiterinfo.ConsumeOverLimit(format.UserTag(h.Tag, id)) {
+		return false
 	}
 
 	if c, exists = h.Counter.Load(h.Tag); !exists {

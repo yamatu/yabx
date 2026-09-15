@@ -54,13 +54,9 @@ func (l *serverLogger) Connect(addr net.Addr, uuid string, tx uint64) {
 	taguuid := format.UserTag(l.Tag, uuid)
 	ip := extractIPFromAddr(addr)
 	if _, r := limiterinfo.CheckLimit(taguuid, ip, addr.Network() == "tcp", true); r {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(taguuid); ok {
-			userLimit.(*limiter.UserLimitInfo).OverLimit = true
-		}
+		limiterinfo.SetOverLimit(taguuid, true)
 	} else {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(taguuid); ok {
-			userLimit.(*limiter.UserLimitInfo).OverLimit = false
-		}
+		limiterinfo.SetOverLimit(taguuid, false)
 		// One hysteria2 client connection equals one device.
 		limiterinfo.Online.Add(taguuid, ip, limiterinfo.UserID(taguuid))
 	}
@@ -79,14 +75,11 @@ func (l *serverLogger) TCPRequest(addr net.Addr, uuid, reqAddr string) {
 	if err != nil {
 		l.logger.Panic("Get limiter error", zap.String("tag", l.Tag), zap.Error(err))
 	}
-	if _, r := limiterinfo.CheckLimit(format.UserTag(l.Tag, uuid), extractIPFromAddr(addr), addr.Network() == "tcp", true); r {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(l.Tag, uuid)); ok {
-			userLimit.(*limiter.UserLimitInfo).OverLimit = true
-		}
+	taguuid := format.UserTag(l.Tag, uuid)
+	if _, r := limiterinfo.CheckLimit(taguuid, extractIPFromAddr(addr), addr.Network() == "tcp", true); r {
+		limiterinfo.SetOverLimit(taguuid, true)
 	} else {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(l.Tag, uuid)); ok {
-			userLimit.(*limiter.UserLimitInfo).OverLimit = false
-		}
+		limiterinfo.SetOverLimit(taguuid, false)
 	}
 	l.logger.Debug("TCP request", zap.String("addr", addr.String()), zap.String("uuid", uuid), zap.String("reqAddr", reqAddr))
 }
@@ -104,14 +97,11 @@ func (l *serverLogger) UDPRequest(addr net.Addr, uuid string, sessionId uint32, 
 	if err != nil {
 		l.logger.Panic("Get limiter error", zap.String("tag", l.Tag), zap.Error(err))
 	}
-	if _, r := limiterinfo.CheckLimit(format.UserTag(l.Tag, uuid), extractIPFromAddr(addr), addr.Network() == "tcp", true); r {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(l.Tag, uuid)); ok {
-			userLimit.(*limiter.UserLimitInfo).OverLimit = true
-		}
+	taguuid := format.UserTag(l.Tag, uuid)
+	if _, r := limiterinfo.CheckLimit(taguuid, extractIPFromAddr(addr), addr.Network() == "tcp", true); r {
+		limiterinfo.SetOverLimit(taguuid, true)
 	} else {
-		if userLimit, ok := limiterinfo.UserLimitInfo.Load(format.UserTag(l.Tag, uuid)); ok {
-			userLimit.(*limiter.UserLimitInfo).OverLimit = false
-		}
+		limiterinfo.SetOverLimit(taguuid, false)
 	}
 	l.logger.Debug("UDP request", zap.String("addr", addr.String()), zap.String("uuid", uuid), zap.Uint32("sessionId", sessionId), zap.String("reqAddr", reqAddr))
 }

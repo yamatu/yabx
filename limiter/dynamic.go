@@ -7,12 +7,25 @@ import (
 	"github.com/InazumaV/V2bX/common/format"
 )
 
+// AddDynamicSpeedLimit sets a temporary speed limit for a user.
+//
+// An entry that already exists is updated through a copy: replacing it would
+// drop the uid (the online device would then be reported as uid 0) and the
+// device limit.
 func (l *Limiter) AddDynamicSpeedLimit(tag string, userInfo *panel.UserInfo, limitNum int, expire int64) error {
-	userLimit := &UserLimitInfo{
-		DynamicSpeedLimit: limitNum,
-		ExpireTime:        time.Now().Add(time.Duration(expire) * time.Second).Unix(),
+	taguuid := format.UserTag(tag, userInfo.Uuid)
+	expireTime := time.Now().Add(time.Duration(expire) * time.Second).Unix()
+	if err := l.updateUserLimit(taguuid, func(u *UserLimitInfo) {
+		u.DynamicSpeedLimit = limitNum
+		u.ExpireTime = expireTime
+	}); err != nil {
+		l.UserLimitInfo.Store(taguuid, &UserLimitInfo{
+			UID:               userInfo.Id,
+			DynamicSpeedLimit: limitNum,
+			ExpireTime:        expireTime,
+		})
 	}
-	l.UserLimitInfo.Store(format.UserTag(tag, userInfo.Uuid), userLimit)
+	l.SpeedLimiter.Delete(taguuid)
 	return nil
 }
 
