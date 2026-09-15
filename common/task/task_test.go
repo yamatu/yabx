@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"log"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,5 +156,70 @@ func TestTaskStartIsIdempotent(t *testing.T) {
 	// would roughly double that.
 	if n := atomic.LoadInt32(&count); n > 25 {
 		t.Fatalf("task armed more than once: %d executions", n)
+	}
+}
+
+// TestTaskSerializesARestartWhileTheBodyRuns covers the nodeInfoMonitor ->
+// reportUserTrafficTask restart: the panel changes the push interval while a
+// report is still running and the report task is closed and started again with
+// first=true. Without execMu the restarted body runs next to the running one and
+// reports the same traffic and the same online state twice.
+func TestTaskSerializesARestartWhileTheBodyRuns(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		inBody    int
+		maxInBody int
+	)
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	tk := &Task{
+		Interval: time.Hour,
+		Execute: func() error {
+			mu.Lock()
+			inBody++
+			if inBody > maxInBody {
+				maxInBody = inBody
+			}
+			mu.Unlock()
+
+			started <- struct{}{}
+			<-release
+
+			mu.Lock()
+			inBody--
+			mu.Unlock()
+			return nil
+		},
+	}
+	t.Cleanup(tk.Close)
+
+	go func() { _ = tk.Start(true) }()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the task body did not start")
+	}
+
+	// The panel changed the interval while the report was running.
+	tk.Close()
+	go func() { _ = tk.Start(true) }()
+
+	select {
+	case <-started:
+		t.Fatal("the restarted body ran next to the running one")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the restarted body never ran")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if maxInBody != 1 {
+		t.Fatalf("%d bodies ran at the same time, want 1", maxInBody)
 	}
 }

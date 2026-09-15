@@ -11,31 +11,37 @@ import (
 )
 
 func (c *Controller) reportUserTrafficTask() (err error) {
+	// One snapshot for the whole report: the node info monitor can swap the tag
+	// and the user list while this runs, and a report mixing the old tag with the
+	// new users would credit the usage of one node to another.
+	tag := c.getTag()
+	users := c.getUsers()
+
 	// Get User traffic
 	userTraffic := make([]panel.UserTraffic, 0)
 	reportedUID := make(map[int]struct{})
 	// Usage that was taken out of the core counters, kept so it can be put back
 	// when the panel does not accept the report.
-	readUsage := make([]readUserUsage, 0, len(c.userList))
-	for i := range c.userList {
-		up, down := c.server.GetUserTraffic(c.tag, c.userList[i].Uuid, true)
+	readUsage := make([]readUserUsage, 0, len(users))
+	for i := range users {
+		up, down := c.server.GetUserTraffic(tag, users[i].Uuid, true)
 		if up > 0 || down > 0 {
 			if c.dynamicSpeedLimitEnabled() {
-				c.addTraffic(c.userList[i].Uuid, up+down)
+				c.addTraffic(users[i].Uuid, up+down)
 			}
-			readUsage = append(readUsage, readUserUsage{uuid: c.userList[i].Uuid, up: up, down: down})
+			readUsage = append(readUsage, readUserUsage{uuid: users[i].Uuid, up: up, down: down})
 			userTraffic = append(userTraffic, panel.UserTraffic{
-				UID:      (c.userList)[i].Id,
+				UID:      users[i].Id,
 				Upload:   up,
 				Download: down})
-			reportedUID[(c.userList)[i].Id] = struct{}{}
+			reportedUID[users[i].Id] = struct{}{}
 		}
 	}
 
 	onlineDevice, err := c.getOnlineUsers()
 	if err != nil {
 		log.WithFields(log.Fields{
-			"tag": c.tag,
+			"tag": c.getTag(),
 			"err": err,
 		}).Info("Get online users failed")
 	} else {
@@ -59,7 +65,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 				result = append(result, online)
 			}
 		}
-		data := buildOnlineIPPayload(result, c.userList)
+		data := buildOnlineIPPayload(result, users)
 
 		// XBoard's /alive only writes the devices it receives: a user that is no
 		// longer reported keeps the previous online_count / user_devices entry
@@ -89,11 +95,11 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 
 		if err = c.apiClient.ReportNodeOnlineUsers(&data); err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Info("Report online users failed")
 		} else {
-			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported, %d Cleared", len(onlineDevice), len(result), cleared)
+			log.WithField("tag", c.getTag()).Infof("Total %d online users, %d Reported, %d Cleared", len(onlineDevice), len(result), cleared)
 		}
 	}
 
@@ -105,21 +111,21 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 			// loses the usage silently: it is never billed and the user's quota is
 			// never consumed. Put it back and let the next round report it again.
 			for i := range readUsage {
-				c.server.RestoreUserTraffic(c.tag, readUsage[i].uuid, readUsage[i].up, readUsage[i].down)
+				c.server.RestoreUserTraffic(tag, readUsage[i].uuid, readUsage[i].up, readUsage[i].down)
 			}
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Info("Report user traffic failed, the usage is reported again on the next round")
 		} else {
-			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
+			log.WithField("tag", c.getTag()).Infof("Report %d users traffic", len(userTraffic))
 		}
 	}
 
 	status, statusErr := serverstatus.GetSystemStatus()
 	if statusErr != nil {
 		log.WithFields(log.Fields{
-			"tag": c.tag,
+			"tag": c.getTag(),
 			"err": statusErr,
 		}).Warn("Get system status failed")
 	}
@@ -145,7 +151,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 	err = c.apiClient.ReportNodeStatus(nodeStatus)
 	if err != nil {
 		log.WithFields(log.Fields{
-			"tag": c.tag,
+			"tag": c.getTag(),
 			"err": err,
 		}).Info("Report node status failed")
 	}
@@ -170,21 +176,21 @@ type readUserUsage struct {
 // two tasks post /alive with different sources made XBoard's setDevices wipe and
 // rewrite the device set on every run, which produced a fluctuating count.
 func (c *Controller) syncOnlineUsersTask() error {
-	if c.limiter == nil {
+	l := c.getLimiter()
+	if l == nil {
 		return nil
 	}
 
 	aliveMap, err := c.apiClient.GetUserAlive()
 	if err != nil {
 		log.WithFields(log.Fields{
-			"tag": c.tag,
+			"tag": c.getTag(),
 			"err": err,
 		}).Warn("Refresh synced alive list failed")
 		return nil
 	}
 
-	c.aliveMap = aliveMap
-	c.limiter.SetAliveList(aliveMap)
+	l.SetAliveList(aliveMap)
 	return nil
 }
 

@@ -12,6 +12,17 @@ type Task struct {
 	// Execute is the task function
 	Execute func() error
 
+	// execMu serializes the body. A task can be restarted while its body is still
+	// running: nodeInfoMonitor lowers the push interval and re-arms the report
+	// task, which would otherwise run two reports (and two /push requests) at the
+	// same time.
+	//
+	// It is deliberately not access: Close and Start are called from the task
+	// body itself (a task re-arms itself when the panel changes its interval),
+	// and they must not block on a mutex the same goroutine holds. For the same
+	// reason a body must not call Start(true) on itself.
+	execMu sync.Mutex
+
 	access  sync.Mutex
 	timer   *time.Timer
 	running bool
@@ -36,7 +47,16 @@ func (t *Task) checkedExecute(first bool) error {
 	}
 
 	if first {
-		if err := t.Execute(); err != nil {
+		t.execMu.Lock()
+		// The task may have been closed while waiting for a body that is already
+		// running (a restart arrives with the same first=true).
+		if t.hasClosed() {
+			t.execMu.Unlock()
+			return nil
+		}
+		err := t.Execute()
+		t.execMu.Unlock()
+		if err != nil {
 			t.access.Lock()
 			t.running = false
 			t.access.Unlock()

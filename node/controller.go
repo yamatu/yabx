@@ -16,21 +16,86 @@ import (
 type Controller struct {
 	server                    vCore.Core
 	apiClient                 *panel.Client
-	tag                       string
-	limiter                   *limiter.Limiter
 	trafficMu                 sync.Mutex
 	traffic                   map[string]int64
-	userList                  []panel.UserInfo
-	aliveMap                  map[int]int
 	onlineMu                  sync.Mutex
 	lastOnlineUIDs            map[int]struct{}
-	info                      *panel.NodeInfo
 	nodeInfoMonitorPeriodic   *task.Task
 	userReportPeriodic        *task.Task
 	renewCertPeriodic         *task.Task
 	dynamicSpeedLimitPeriodic *task.Task
 	onlineIpReportPeriodic    *task.Task
 	*conf.Options
+
+	// stateMu guards the fields below. nodeInfoMonitor rewrites them (a reload
+	// changes the tag, the limiter and the user list) while the reporting tasks
+	// read them from their own goroutine. Read them through the getters, write
+	// them through the setters, never directly.
+	stateMu  sync.RWMutex
+	tag      string
+	limiter  *limiter.Limiter
+	userList []panel.UserInfo
+	info     *panel.NodeInfo
+}
+
+// The state getters return the stored value for a short read. The user list is
+// shared, not copied: it is only ever replaced as a whole, never modified in
+// place, so a reader that does not write to it is safe.
+
+func (c *Controller) getTag() string {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.tag
+}
+
+func (c *Controller) setTag(tag string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	c.tag = tag
+}
+
+func (c *Controller) getLimiter() *limiter.Limiter {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.limiter
+}
+
+func (c *Controller) setLimiter(l *limiter.Limiter) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	c.limiter = l
+}
+
+func (c *Controller) getUsers() []panel.UserInfo {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.userList
+}
+
+func (c *Controller) setUsers(users []panel.UserInfo) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	c.userList = users
+}
+
+func (c *Controller) getInfo() *panel.NodeInfo {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.info
+}
+
+func (c *Controller) setInfo(info *panel.NodeInfo) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	c.info = info
 }
 
 // NewController return a Node controller with default parameters.
@@ -53,30 +118,31 @@ func (c *Controller) Start() error {
 		return fmt.Errorf("get node info error: %s", err)
 	}
 	// Update user
-	c.userList, err = c.apiClient.GetUserList()
+	userList, err := c.apiClient.GetUserList()
 	if err != nil {
 		return fmt.Errorf("get user list error: %s", err)
 	}
-	if len(c.userList) == 0 {
+	if len(userList) == 0 {
 		return errors.New("add users error: not have any user")
 	}
-	c.aliveMap, err = c.apiClient.GetUserAlive()
+	aliveMap, err := c.apiClient.GetUserAlive()
 	if err != nil {
 		return fmt.Errorf("failed to get user alive list: %s", err)
 	}
-	if len(c.Options.Name) == 0 {
-		c.tag = c.buildNodeTag(node)
-	} else {
-		c.tag = c.Options.Name
+	tag := c.Options.Name
+	if len(tag) == 0 {
+		tag = c.buildNodeTag(node)
 	}
 
 	// add limiter
-	l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, c.aliveMap)
+	l := limiter.AddLimiter(tag, &c.LimitConfig, userList, aliveMap)
 	// add rule limiter
 	if err = l.UpdateRule(&node.Rules); err != nil {
 		return fmt.Errorf("update rule error: %s", err)
 	}
-	c.limiter = l
+	c.setTag(tag)
+	c.setUsers(userList)
+	c.setLimiter(l)
 	if node.Security == panel.Tls {
 		err = c.requestCert()
 		if err != nil {
@@ -84,27 +150,28 @@ func (c *Controller) Start() error {
 		}
 	}
 	// Add new tag
-	err = c.server.AddNode(c.tag, node, c.Options)
+	err = c.server.AddNode(tag, node, c.Options)
 	if err != nil {
 		return fmt.Errorf("add new node error: %s", err)
 	}
 	added, err := c.server.AddUsers(&vCore.AddUsersParams{
-		Tag:      c.tag,
-		Users:    c.userList,
+		Tag:      tag,
+		Users:    userList,
 		NodeInfo: node,
 	})
 	if err != nil {
 		return fmt.Errorf("add users error: %s", err)
 	}
-	log.WithField("tag", c.tag).Infof("Added %d new users", added)
-	c.info = node
+	log.WithField("tag", tag).Infof("Added %d new users", added)
+	c.setInfo(node)
 	c.startTasks(node)
 	return nil
 }
 
 // Close implement the Close() function of the service interface
 func (c *Controller) Close() error {
-	limiter.DeleteLimiter(c.tag)
+	tag := c.getTag()
+	limiter.DeleteLimiter(tag)
 	if c.nodeInfoMonitorPeriodic != nil {
 		c.nodeInfoMonitorPeriodic.Close()
 	}
@@ -120,7 +187,7 @@ func (c *Controller) Close() error {
 	if c.onlineIpReportPeriodic != nil {
 		c.onlineIpReportPeriodic.Close()
 	}
-	err := c.server.DelNode(c.tag)
+	err := c.server.DelNode(tag)
 	if err != nil {
 		return fmt.Errorf("del node error: %s", err)
 	}

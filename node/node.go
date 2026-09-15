@@ -61,7 +61,7 @@ func (n *Node) closeControllers(controllers []*Controller) {
 			continue
 		}
 		if err := c.Close(); err != nil {
-			log.WithField("tag", c.tag).Errorf("Close node controller failed: %s", err)
+			log.WithField("tag", c.getTag()).Errorf("Close node controller failed: %s", err)
 		}
 	}
 }

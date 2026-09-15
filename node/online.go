@@ -12,11 +12,12 @@ import (
 // probe (e.g. the xray stats OnlineMap) made the reported online count depend
 // on the core and expire after ~20s even for long lived connections.
 func (c *Controller) getOnlineUsers() ([]panel.OnlineUser, error) {
-	if c.limiter == nil {
+	l := c.getLimiter()
+	if l == nil {
 		return []panel.OnlineUser{}, nil
 	}
 
-	onlineUsers, err := c.limiter.GetOnlineDevice()
+	onlineUsers, err := l.GetOnlineDevice()
 	if err != nil {
 		return nil, err
 	}

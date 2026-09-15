@@ -216,8 +216,8 @@ func TestReportUserTrafficRestoresUsageWhenThePanelFails(t *testing.T) {
 	}
 	core := &stubCore{up: 1024, down: 512}
 	c := NewController(core, apiClient, &conf.Options{})
-	c.tag = "node-test"
-	c.userList = []panel.UserInfo{{Id: 42, Uuid: "uuid-42"}}
+	c.setTag("node-test")
+	c.setUsers([]panel.UserInfo{{Id: 42, Uuid: "uuid-42"}})
 
 	if err := c.reportUserTrafficTask(); err != nil {
 		t.Fatalf("reportUserTrafficTask: %v", err)

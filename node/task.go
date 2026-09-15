@@ -26,7 +26,7 @@ func (c *Controller) normalizedPushInterval(interval time.Duration) time.Duratio
 			interval = 20 * time.Second
 		}
 		if interval > maxPanelPushInterval {
-			log.WithField("tag", c.tag).Warnf(
+			log.WithField("tag", c.getTag()).Warnf(
 				"Panel push interval %s exceeds the online status window, lowering it to %s",
 				interval, maxPanelPushInterval)
 			interval = maxPanelPushInterval
@@ -50,7 +50,8 @@ func (c *Controller) retryNodeReload() {
 // push interval, otherwise a device could be dropped between two reports and
 // make the reported online count flap.
 func (c *Controller) applyOnlineTTL(pushInterval time.Duration) {
-	if c.limiter == nil {
+	l := c.getLimiter()
+	if l == nil {
 		return
 	}
 	ttl := time.Duration(c.LimitConfig.OnlineTimeout) * time.Second
@@ -58,12 +59,12 @@ func (c *Controller) applyOnlineTTL(pushInterval time.Duration) {
 		ttl = 5 * time.Minute
 	}
 	if minimum := pushInterval + time.Minute; ttl < minimum {
-		log.WithField("tag", c.tag).Warnf(
+		log.WithField("tag", c.getTag()).Warnf(
 			"OnlineTimeout %s is not greater than the push interval %s, raising it to %s",
 			ttl, pushInterval, minimum)
 		ttl = minimum
 	}
-	c.limiter.SetOnlineTTL(ttl)
+	l.SetOnlineTTL(ttl)
 }
 
 func (c *Controller) dynamicSpeedLimitEnabled() bool {
@@ -89,7 +90,7 @@ func (c *Controller) onlineIPSyncEnabled() bool {
 		return true
 	}
 
-	for _, user := range c.userList {
+	for _, user := range c.getUsers() {
 		if user.DeviceLimit > 0 {
 			return true
 		}
@@ -128,7 +129,7 @@ func (c *Controller) ensureOnlineIPSyncTask() {
 		Interval: interval,
 		Execute:  c.syncOnlineUsersTask,
 	}
-	log.WithField("tag", c.tag).Info("Start online IP sync")
+	log.WithField("tag", c.getTag()).Info("Start online IP sync")
 	_ = c.onlineIpReportPeriodic.Start(true)
 }
 
@@ -146,10 +147,10 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 		Interval: pushInterval,
 		Execute:  c.reportUserTrafficTask,
 	}
-	log.WithField("tag", c.tag).Info("Start monitor node status")
+	log.WithField("tag", c.getTag()).Info("Start monitor node status")
 	// delay to start nodeInfoMonitor
 	_ = c.nodeInfoMonitorPeriodic.Start(false)
-	log.WithField("tag", c.tag).Info("Start report node status")
+	log.WithField("tag", c.getTag()).Info("Start report node status")
 	_ = c.userReportPeriodic.Start(true)
 	if node.Security == panel.Tls {
 		switch c.CertConfig.CertMode {
@@ -159,7 +160,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 				Interval: time.Hour * 24,
 				Execute:  c.renewCertTask,
 			}
-			log.WithField("tag", c.tag).Info("Start renew cert")
+			log.WithField("tag", c.getTag()).Info("Start renew cert")
 			// delay to start renewCert
 			_ = c.renewCertPeriodic.Start(true)
 		}
@@ -181,7 +182,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	newN, err := c.apiClient.GetNodeInfo()
 	if err != nil {
 		log.WithFields(log.Fields{
-			"tag": c.tag,
+			"tag": c.getTag(),
 			"err": err,
 		}).Error("Get node info failed")
 		return nil
@@ -190,7 +191,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	newU, err := c.apiClient.GetUserList()
 	if err != nil {
 		log.WithFields(log.Fields{
-			"tag": c.tag,
+			"tag": c.getTag(),
 			"err": err,
 		}).Error("Get user list failed")
 		return nil
@@ -199,50 +200,51 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	newA, err := c.apiClient.GetUserAlive()
 	if err != nil {
 		log.WithFields(log.Fields{
-			"tag": c.tag,
+			"tag": c.getTag(),
 			"err": err,
 		}).Error("Get alive list failed")
 		return nil
 	}
 	if newN != nil {
-		c.info = newN
+		c.setInfo(newN)
 		// nodeInfo changed
 		if newU != nil {
-			c.userList = newU
+			c.setUsers(newU)
 		}
 		c.resetTraffic()
 		// Remove old node
-		log.WithField("tag", c.tag).Info("Node changed, reload")
+		log.WithField("tag", c.getTag()).Info("Node changed, reload")
 
 		// A node that is already gone is not an error: the new one is registered
 		// right below, and aborting here would drop the reload entirely.
-		if err = c.server.DelNode(c.tag); err != nil {
+		if err = c.server.DelNode(c.getTag()); err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("Delete node failed")
 		}
 
 		// Update limiter
 		if len(c.Options.Name) == 0 {
-			oldTag := c.tag
-			c.tag = c.buildNodeTag(newN)
+			oldTag := c.getTag()
+			newTag := c.buildNodeTag(newN)
+			c.setTag(newTag)
 			// Remove the limiter of the OLD tag. Deleting with the freshly built
 			// tag leaked the previous limiter (and its online registry) on every
 			// reload, and those leaks were swept once a minute forever.
 			limiter.DeleteLimiter(oldTag)
 			// Add new Limiter
-			l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, newA)
-			c.limiter = l
+			l := limiter.AddLimiter(newTag, &c.LimitConfig, c.getUsers(), newA)
+			c.setLimiter(l)
 		}
 		// update alive list
 		if newA != nil {
-			c.limiter.SetAliveList(newA)
+			c.getLimiter().SetAliveList(newA)
 		}
 		// Update rule
-		if err = c.limiter.UpdateRule(&newN.Rules); err != nil {
+		if err = c.getLimiter().UpdateRule(&newN.Rules); err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("Update Rule failed")
 			c.retryNodeReload()
@@ -253,7 +255,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		if newN.Security == panel.Tls {
 			if err = c.requestCert(); err != nil {
 				log.WithFields(log.Fields{
-					"tag": c.tag,
+					"tag": c.getTag(),
 					"err": err,
 				}).Error("Request cert failed")
 				c.retryNodeReload()
@@ -261,21 +263,21 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			}
 		}
 		// add new node
-		if err = c.server.AddNode(c.tag, newN, c.Options); err != nil {
+		if err = c.server.AddNode(c.getTag(), newN, c.Options); err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("Add node failed, retrying on the next pull")
 			c.retryNodeReload()
 			return nil
 		}
 		if _, err = c.server.AddUsers(&vCore.AddUsersParams{
-			Tag:      c.tag,
-			Users:    c.userList,
+			Tag:      c.getTag(),
+			Users:    c.getUsers(),
 			NodeInfo: newN,
 		}); err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("Add users failed")
 			c.retryNodeReload()
@@ -296,13 +298,13 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		}
 		c.applyOnlineTTL(newPushInterval)
 		c.ensureOnlineIPSyncTask()
-		log.WithField("tag", c.tag).Infof("Added %d new users", len(c.userList))
+		log.WithField("tag", c.getTag()).Infof("Added %d new users", len(c.getUsers()))
 		// exit
 		return nil
 	}
 	// update alive list
 	if newA != nil {
-		c.limiter.SetAliveList(newA)
+		c.getLimiter().SetAliveList(newA)
 	}
 	// node no changed, check users.
 	// GetUserList returns nil for "not modified" (304), so an empty but non nil
@@ -310,13 +312,13 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	if newU == nil {
 		return nil
 	}
-	deleted, added := compareUserList(c.userList, newU)
+	deleted, added := compareUserList(c.getUsers(), newU)
 	if len(deleted) > 0 {
 		// have deleted users
-		err = c.server.DelUsers(deleted, c.tag, c.info)
+		err = c.server.DelUsers(deleted, c.getTag(), c.getInfo())
 		if err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("Delete users failed")
 			return nil
@@ -325,13 +327,13 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	if len(added) > 0 {
 		// have added users
 		_, err = c.server.AddUsers(&vCore.AddUsersParams{
-			Tag:      c.tag,
-			NodeInfo: c.info,
+			Tag:      c.getTag(),
+			NodeInfo: c.getInfo(),
 			Users:    added,
 		})
 		if err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("Add users failed")
 			return nil
@@ -339,10 +341,10 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	}
 	if len(added) > 0 || len(deleted) > 0 {
 		// update Limiter
-		c.limiter.UpdateUser(c.tag, added, deleted)
+		c.getLimiter().UpdateUser(c.getTag(), added, deleted)
 		if err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("limiter users failed")
 			return nil
@@ -354,10 +356,10 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			}
 		}
 	}
-	c.userList = newU
+	c.setUsers(newU)
 	c.ensureOnlineIPSyncTask()
 	if len(added)+len(deleted) != 0 {
-		log.WithField("tag", c.tag).
+		log.WithField("tag", c.getTag()).
 			Infof("%d user deleted, %d user added", len(deleted), len(added))
 	}
 	return nil
@@ -369,15 +371,15 @@ func (c *Controller) SpeedChecker() error {
 	}
 
 	for _, uuid := range c.consumeDynamicSpeedLimitUsers() {
-		err := c.limiter.UpdateDynamicSpeedLimit(
-			c.tag,
+		err := c.getLimiter().UpdateDynamicSpeedLimit(
+			c.getTag(),
 			uuid,
 			c.LimitConfig.DynamicSpeedLimitConfig.SpeedLimit,
 			time.Now().Add(time.Duration(c.LimitConfig.DynamicSpeedLimitConfig.ExpireTime)*time.Minute),
 		)
 		if err != nil {
 			log.WithFields(log.Fields{
-				"tag": c.tag,
+				"tag": c.getTag(),
 				"err": err,
 			}).Error("Update dynamic speed limit failed")
 		}
