@@ -1,0 +1,17 @@
+# Build context optimizations: keep the Docker build fast and free of local
+# caches, agent worktrees and secrets.
+.git
+.gitignore
+.github
+.claude
+.agents
+.golutra
+.gocache
+dist
+build_assets
+Xray-core-25.12.8
+*.log
+V2bX-linux-*
+node/cert
+node/*.pem
+node/*.key

@@ -1,5 +1,8 @@
 # Build go
-FROM golang:1.24.1-alpine AS builder
+# Must match the toolchain in go.mod (toolchain go1.25.2). The official golang
+# images set GOTOOLCHAIN=local, so an older base image makes `go mod download`
+# fail with "go.mod requires go >= 1.25".
+FROM golang:1.25.2-alpine AS builder
 WORKDIR /app
 COPY . .
 ENV CGO_ENABLED=0
