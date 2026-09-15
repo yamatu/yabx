@@ -1,0 +1,73 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/test.yml"
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.2'
+          cache: true
+
+      # The shipped binary is built with these tags (see release.yml), so a
+      # feature gated by one of them must not break the build.
+      - name: Build (release tags)
+        env:
+          CGO_ENABLED: 0
+        run: go build -tags "xray sing with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l . | grep -v '^Xray-core-' || true)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found files that need formatting"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        run: go test ./...
+
+  race:
+    name: Test with the race detector
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.2'
+          cache: true
+
+      - name: Test
+        run: go test -race ./...
