@@ -50,8 +50,8 @@ func (h *HookServer) LogTraffic(id string, tx, rx uint64) (ok bool) {
 	}
 
 	if tc, ok := c.(*counter.TrafficCounter); ok {
-		tc.Rx(id, int(rx))
-		tc.Tx(id, int(tx))
+		tc.Rx(id, int64(rx))
+		tc.Tx(id, int64(tx))
 		return true
 	}
 

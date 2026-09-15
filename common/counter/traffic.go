@@ -63,12 +63,15 @@ func (c *TrafficCounter) Delete(id string) {
 	c.counters.Delete(id)
 }
 
-func (c *TrafficCounter) Rx(id string, n int) {
+// Rx and Tx take an int64: they receive the byte counts of a whole stream and
+// an int truncates them to 32 bits on the 32 bit targets this project builds
+// (386, armv7, mips), silently losing traffic above 2GiB per stream.
+func (c *TrafficCounter) Rx(id string, n int64) {
 	cts := c.GetCounter(id)
-	cts.DownCounter.Add(int64(n))
+	cts.DownCounter.Add(n)
 }
 
-func (c *TrafficCounter) Tx(id string, n int) {
+func (c *TrafficCounter) Tx(id string, n int64) {
 	cts := c.GetCounter(id)
-	cts.UpCounter.Add(int64(n))
+	cts.UpCounter.Add(n)
 }

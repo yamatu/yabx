@@ -17,6 +17,33 @@ type ConnLimiter struct {
 	ip        sync.Map // map[string]map[string]int
 }
 
+// addConnCount increments the tcp connection counter for user when a limit is
+// configured.
+func (c *ConnLimiter) addConnCount(user string, isTcp bool) {
+	if c.connLimit == 0 || !isTcp {
+		return
+	}
+	if v, ok := c.count.Load(user); ok {
+		c.count.Store(user, v.(int)+1)
+	} else {
+		c.count.Store(user, 1)
+	}
+}
+
+// delConnCount decrements the tcp connection counter for user.
+func (c *ConnLimiter) delConnCount(user string) {
+	if c.connLimit == 0 {
+		return
+	}
+	if v, ok := c.count.Load(user); ok {
+		if n := v.(int); n <= 1 {
+			c.count.Delete(user)
+		} else {
+			c.count.Store(user, n-1)
+		}
+	}
+}
+
 func NewConnLimiter(conn int, ip int, realtime bool, onlineTTL time.Duration) *ConnLimiter {
 	if onlineTTL <= 0 {
 		onlineTTL = nonRealtimeOnlineTTL
@@ -42,20 +69,11 @@ func (c *ConnLimiter) SetOnlineTTL(ttl time.Duration) {
 
 func (c *ConnLimiter) AddConnCount(user string, ip string, isTcp bool) (limit bool) {
 	if c.connLimit != 0 {
-		if v, ok := c.count.Load(user); ok {
-			if v.(int) >= c.connLimit {
-				// over connection limit
-				return true
-			} else if isTcp {
-				// tcp protocol
-				// connection count add
-				c.count.Store(user, v.(int)+1)
-			}
-		} else if isTcp {
-			// tcp protocol
-			// store connection count
-			c.count.Store(user, 1)
+		if v, ok := c.count.Load(user); ok && v.(int) >= c.connLimit {
+			// over connection limit
+			return true
 		}
+		c.addConnCount(user, isTcp)
 	}
 	// first user map
 	ipMap := new(sync.Map)
@@ -96,7 +114,11 @@ func (c *ConnLimiter) AddConnCount(user string, ip string, isTcp bool) (limit bo
 					return true
 				})
 				if limit {
-					// over ip limit
+					// Over the ip limit: this connection is rejected, so the tcp
+					// connection count added above must be rolled back. Leaking it
+					// made the counter grow on every rejected connection until the
+					// user was locked out for good ("Limited by ip or conn").
+					c.delConnCount(user)
 					return
 				}
 			}
@@ -116,17 +138,14 @@ func (c *ConnLimiter) AddConnCount(user string, ip string, isTcp bool) (limit bo
 
 // DelConnCount Delete tcp connection count, no tcp do not use
 func (c *ConnLimiter) DelConnCount(user string, ip string) {
+	// The connection counter is released in every mode: skipping it for
+	// non-realtime nodes turned the limit into a lifetime counter, so the user was
+	// eventually rejected forever.
+	c.delConnCount(user)
+	// Non-realtime entries store a timestamp instead of a counter, so the ip
+	// bookkeeping below only applies to the realtime maps.
 	if !c.realtime {
 		return
-	}
-	if c.connLimit != 0 {
-		if v, ok := c.count.Load(user); ok {
-			if v.(int) == 1 {
-				c.count.Delete(user)
-			} else {
-				c.count.Store(user, v.(int)-1)
-			}
-		}
 	}
 	if c.ipLimit == 0 {
 		return

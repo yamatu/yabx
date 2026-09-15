@@ -82,7 +82,13 @@ func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapte
 	// Reference-count the online device for the whole life of the connection so
 	// long lived connections stay online and disappear shortly after Close.
 	l.Online.Add(taguuid, ip, l.UserID(taguuid))
-	return newTrackedConn(conn, func() { l.Online.Del(taguuid, ip) })
+	return newTrackedConn(conn, func() {
+		l.Online.Del(taguuid, ip)
+		// Release the tcp connection slot as well: sing never decremented it, so
+		// the per-user connection count only ever grew and the user ended up
+		// permanently rejected by ConnLimit.
+		l.ConnLimiter.DelConnCount(taguuid, ip)
+	})
 }
 
 func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
