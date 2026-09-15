@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-resty/resty/v2"
@@ -14,9 +15,10 @@ import (
 
 func newOnlineTestClient(host, panelType string) *Client {
 	return &Client{
-		client:    resty.New().SetBaseURL(host),
-		PanelType: panelType,
-		APIHost:   host,
+		client:     resty.New().SetBaseURL(host),
+		pushClient: resty.New().SetBaseURL(host),
+		PanelType:  panelType,
+		APIHost:    host,
 		UserList: &UserListBody{
 			Users: []UserInfo{{Id: 42, Uuid: "uuid-42"}},
 		},
@@ -160,5 +162,108 @@ func TestReportNodeOnlineUsersDefaultFallsBackWithRawPayload(t *testing.T) {
 	}
 	if len(paths) != 2 || paths[0] != "/api/v1/server/UniProxy/alive" || paths[1] != "/api/v2/server/alive" {
 		t.Fatalf("unexpected fallback path order: %v", paths)
+	}
+}
+
+func newPushTestClient(host string) *Client {
+	return &Client{
+		client:     resty.New().SetBaseURL(host),
+		pushClient: resty.New().SetBaseURL(host),
+		PanelType:  "Xboard",
+		APIHost:    host,
+		UserList:   &UserListBody{},
+	}
+}
+
+// TestReportUserTrafficDoesNotReplayToAnotherPathOnServerError guards against
+// double billing: /push applies the payload as an increment (XBoard uses
+// incrementEach), so posting the same values to the next candidate path after
+// the panel stored them but failed to answer bills the user twice.
+func TestReportUserTrafficDoesNotReplayToAnotherPathOnServerError(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		paths []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		if r.URL.Path == "/api/v1/server/UniProxy/push" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newPushTestClient(srv.URL)
+	err := c.ReportUserTraffic([]UserTraffic{{UID: 42, Upload: 1, Download: 2}})
+	if err == nil {
+		t.Fatal("ReportUserTraffic must report the failure so the usage can be reported again")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 || paths[0] != "/api/v1/server/UniProxy/push" {
+		t.Fatalf("posted paths = %v, want only the first candidate", paths)
+	}
+}
+
+// TestReportUserTrafficFallsBackWhenEndpointIsMissing keeps the fallback for
+// panels that do not expose the UniProxy route at all. A 404 means the request
+// was never applied, so trying the next path cannot double count.
+func TestReportUserTrafficFallsBackWhenEndpointIsMissing(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		paths []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		if r.URL.Path == "/api/v1/server/UniProxy/push" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newPushTestClient(srv.URL)
+	if err := c.ReportUserTraffic([]UserTraffic{{UID: 42, Upload: 1, Download: 2}}); err != nil {
+		t.Fatalf("ReportUserTraffic: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"/api/v1/server/UniProxy/push", "/api/v2/server/push"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("posted paths = %v, want %v", paths, want)
+	}
+}
+
+// TestReportUserTrafficIsNotRetriedOnTransportError pins the non retrying push
+// client: a request whose response was lost (the counter was already
+// incremented on the panel side) must not be replayed automatically.
+func TestReportUserTrafficIsNotRetriedOnTransportError(t *testing.T) {
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		if hijacker, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hijacker.Hijack(); err == nil {
+				_ = conn.Close()
+				return
+			}
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := newPushTestClient(srv.URL)
+	if err := c.ReportUserTraffic([]UserTraffic{{UID: 42, Upload: 1, Download: 2}}); err == nil {
+		t.Fatal("ReportUserTraffic must fail when the connection is dropped")
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("the panel received %d requests, want 1 (no automatic replay of /push)", got)
 	}
 }

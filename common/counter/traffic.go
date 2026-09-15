@@ -63,6 +63,30 @@ func (c *TrafficCounter) Delete(id string) {
 	c.counters.Delete(id)
 }
 
+// Restore puts usage back into the counters, undoing the Reset that was done
+// when the usage was read.
+//
+// Traffic reports are increments on the panel side, so a report that failed (or
+// whose response was lost) must be sent again instead of being dropped. The
+// counters are only touched with atomic adds, so the traffic that arrives while
+// a report is in flight is never lost.
+func (c *TrafficCounter) Restore(id string, up, down int64) {
+	if up <= 0 && down <= 0 {
+		return
+	}
+	cts, ok := c.counters.Load(id)
+	if !ok {
+		return
+	}
+	storage := cts.(*TrafficStorage)
+	if up > 0 {
+		storage.UpCounter.Add(up)
+	}
+	if down > 0 {
+		storage.DownCounter.Add(down)
+	}
+}
+
 // Rx and Tx take an int64: they receive the byte counts of a whole stream and
 // an int truncates them to 32 bits on the 32 bit targets this project builds
 // (386, armv7, mips), silently losing traffic above 2GiB per stream.

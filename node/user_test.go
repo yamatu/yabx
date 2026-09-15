@@ -1,10 +1,15 @@
 package node
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/InazumaV/V2bX/api/panel"
+	"github.com/InazumaV/V2bX/conf"
+	vCore "github.com/InazumaV/V2bX/core"
 )
 
 func TestBuildOnlineIPPayloadOnlyIncludesOnlineUsers(t *testing.T) {
@@ -148,5 +153,102 @@ func TestCompareUserListDetectsDeviceLimitChanges(t *testing.T) {
 	deleted, added := compareUserList(oldUsers, newUsers)
 	if len(deleted) != 1 || len(added) != 1 {
 		t.Fatalf("compareUserList should treat device_limit changes as replacement, deleted=%v added=%v", deleted, added)
+	}
+}
+
+// stubCore implements only the parts of the core interface that the traffic
+// task uses. The embedded interface is nil on purpose: anything else would
+// panic and make the test fail loudly instead of silently relying on more of
+// the core.
+type stubCore struct {
+	vCore.Core
+	tag      string
+	up, down int64
+	resets   int
+	restored []readUserUsage
+}
+
+func (s *stubCore) GetUserTraffic(tag, uuid string, reset bool) (int64, int64) {
+	s.tag = tag
+	if reset {
+		s.resets++
+	}
+	return s.up, s.down
+}
+
+func (s *stubCore) RestoreUserTraffic(tag, uuid string, up, down int64) {
+	s.restored = append(s.restored, readUserUsage{uuid: uuid, up: up, down: down})
+}
+
+// TestReportUserTrafficRestoresUsageWhenThePanelFails guards the traffic loss:
+// the counters are reset when they are read, so a report that never reached the
+// panel used to drop the usage of the whole round (never billed and the user's
+// quota never consumed).
+func TestReportUserTrafficRestoresUsageWhenThePanelFails(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		pushes int
+		fail   = true
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/server/UniProxy/push" {
+			mu.Lock()
+			pushes++
+			shouldFail := fail
+			mu.Unlock()
+			if shouldFail {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	apiClient, err := panel.New(&conf.ApiConfig{
+		APIHost:  srv.URL,
+		Key:      "token",
+		NodeType: "vless",
+		NodeID:   1,
+	})
+	if err != nil {
+		t.Fatalf("panel.New: %v", err)
+	}
+	core := &stubCore{up: 1024, down: 512}
+	c := NewController(core, apiClient, &conf.Options{})
+	c.tag = "node-test"
+	c.userList = []panel.UserInfo{{Id: 42, Uuid: "uuid-42"}}
+
+	if err := c.reportUserTrafficTask(); err != nil {
+		t.Fatalf("reportUserTrafficTask: %v", err)
+	}
+
+	if core.resets != 1 {
+		t.Fatalf("GetUserTraffic called with reset %d times, want 1", core.resets)
+	}
+	if len(core.restored) != 1 {
+		t.Fatalf("restored %d usage entries after a failed report, want 1", len(core.restored))
+	}
+	got := core.restored[0]
+	if got.uuid != "uuid-42" || got.up != 1024 || got.down != 512 {
+		t.Fatalf("restored usage = %+v, want uuid-42/1024/512", got)
+	}
+
+	// The panel accepts the report now: the restored usage is reported and
+	// nothing is put back a second time.
+	mu.Lock()
+	fail = false
+	mu.Unlock()
+	core.restored = nil
+	if err := c.reportUserTrafficTask(); err != nil {
+		t.Fatalf("reportUserTrafficTask: %v", err)
+	}
+	if len(core.restored) != 0 {
+		t.Fatalf("restored %d usage entries after the panel accepted the report, want 0", len(core.restored))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if pushes != 2 {
+		t.Fatalf("the panel received %d pushes, want 2", pushes)
 	}
 }

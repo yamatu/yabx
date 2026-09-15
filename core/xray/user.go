@@ -71,6 +71,20 @@ func (c *Xray) GetUserTraffic(tag, uuid string, reset bool) (up int64, down int6
 	return up, down
 }
 
+func (c *Xray) RestoreUserTraffic(tag, uuid string, up, down int64) {
+	// Add is atomic, so usage that arrives while the report is retried is kept.
+	if up > 0 {
+		if counter := c.shm.GetCounter("user>>>" + format.UserTag(tag, uuid) + ">>>traffic>>>uplink"); counter != nil {
+			counter.Add(up)
+		}
+	}
+	if down > 0 {
+		if counter := c.shm.GetCounter("user>>>" + format.UserTag(tag, uuid) + ">>>traffic>>>downlink"); counter != nil {
+			counter.Add(down)
+		}
+	}
+}
+
 func (c *Xray) AddUsers(p *vCore.AddUsersParams) (added int, err error) {
 	users := make([]*protocol.User, 0, len(p.Users))
 	switch p.NodeInfo.Type {

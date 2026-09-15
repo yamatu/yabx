@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/goccy/go-json"
@@ -241,7 +242,7 @@ func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 		req := ServerPushUserTrafficRequest{
 			Traffic: traffic,
 		}
-		r, err := c.client.R().
+		r, err := c.pushClient.R().
 			SetBody(req).
 			ForceContentType("application/json").
 			Post(path)
@@ -267,7 +268,7 @@ func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 		}
 		var lastErr error
 		for _, path := range paths {
-			r, err := c.client.R().
+			r, err := c.pushClient.R().
 				SetBody(data).
 				ForceContentType("application/json").
 				Post(path)
@@ -275,6 +276,14 @@ func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 				return nil
 			}
 			lastErr = err
+			// Only an endpoint that is not there may be replaced by the next
+			// candidate. Any other failure is ambiguous (the panel may have stored
+			// the increment before the response was lost), and sending the same
+			// increment to a second path would bill the user twice. The controller
+			// puts the usage back instead and reports it on the next round.
+			if r == nil || (r.StatusCode() != http.StatusNotFound && r.StatusCode() != http.StatusMethodNotAllowed) {
+				break
+			}
 		}
 		return lastErr
 	}

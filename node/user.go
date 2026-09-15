@@ -14,12 +14,16 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 	// Get User traffic
 	userTraffic := make([]panel.UserTraffic, 0)
 	reportedUID := make(map[int]struct{})
+	// Usage that was taken out of the core counters, kept so it can be put back
+	// when the panel does not accept the report.
+	readUsage := make([]readUserUsage, 0, len(c.userList))
 	for i := range c.userList {
 		up, down := c.server.GetUserTraffic(c.tag, c.userList[i].Uuid, true)
 		if up > 0 || down > 0 {
 			if c.dynamicSpeedLimitEnabled() {
 				c.addTraffic(c.userList[i].Uuid, up+down)
 			}
+			readUsage = append(readUsage, readUserUsage{uuid: c.userList[i].Uuid, up: up, down: down})
 			userTraffic = append(userTraffic, panel.UserTraffic{
 				UID:      (c.userList)[i].Id,
 				Upload:   up,
@@ -96,10 +100,17 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 	if len(userTraffic) > 0 {
 		err = c.apiClient.ReportUserTraffic(userTraffic)
 		if err != nil {
+			// The panel applies traffic as an increment (XBoard: incrementEach) and
+			// the counters were reset when they were read, so dropping the report
+			// loses the usage silently: it is never billed and the user's quota is
+			// never consumed. Put it back and let the next round report it again.
+			for i := range readUsage {
+				c.server.RestoreUserTraffic(c.tag, readUsage[i].uuid, readUsage[i].up, readUsage[i].down)
+			}
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Info("Report user traffic failed")
+			}).Info("Report user traffic failed, the usage is reported again on the next round")
 		} else {
 			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
 		}
@@ -141,6 +152,14 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 
 	userTraffic = nil
 	return nil
+}
+
+// readUserUsage is a traffic sample taken from a core counter with reset=true,
+// together with the uuid it belongs to so a failed report can be undone.
+type readUserUsage struct {
+	uuid string
+	up   int64
+	down int64
 }
 
 // syncOnlineUsersTask refreshes the panel side device count (alivelist) used to

@@ -9,6 +9,7 @@ import (
 // Debug set the client debug for client
 func (c *Client) Debug() {
 	c.client.SetDebug(true)
+	c.pushClient.SetDebug(true)
 }
 
 func (c *Client) assembleURL(path string) string {

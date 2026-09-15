@@ -56,6 +56,20 @@ func (h *Hysteria2) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeIn
 	return nil
 }
 
+func (h *Hysteria2) RestoreUserTraffic(tag string, uuid string, up, down int64) {
+	node, ok := h.getNode(tag)
+	if !ok {
+		return
+	}
+	logger, ok := node.TrafficLogger.(*HookServer)
+	if !ok || logger == nil {
+		return
+	}
+	if v, ok := logger.Counter.Load(tag); ok {
+		v.(*counter.TrafficCounter).Restore(uuid, up, down)
+	}
+}
+
 func (h *Hysteria2) GetUserTraffic(tag string, uuid string, reset bool) (up int64, down int64) {
 	node, ok := h.getNode(tag)
 	if !ok {

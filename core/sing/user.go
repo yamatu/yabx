@@ -134,6 +134,12 @@ func (b *Sing) GetUserTraffic(tag, uuid string, reset bool) (up int64, down int6
 	return 0, 0
 }
 
+func (b *Sing) RestoreUserTraffic(tag, uuid string, up, down int64) {
+	if v, ok := b.hookServer.counter.Load(tag); ok {
+		v.(*counter.TrafficCounter).Restore(uuid, up, down)
+	}
+}
+
 type UserDeleter interface {
 	DelUsers(uuid []string) error
 }

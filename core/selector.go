@@ -136,6 +136,14 @@ func (s *Selector) GetUserTraffic(tag, uuid string, reset bool) (up int64, down 
 	return t.(Core).GetUserTraffic(tag, uuid, reset)
 }
 
+func (s *Selector) RestoreUserTraffic(tag, uuid string, up, down int64) {
+	t, e := s.nodes.Load(tag)
+	if !e {
+		return
+	}
+	t.(Core).RestoreUserTraffic(tag, uuid, up, down)
+}
+
 func (s *Selector) DelUsers(users []panel.UserInfo, tag string, info *panel.NodeInfo) error {
 	t, e := s.nodes.Load(tag)
 	if !e {
