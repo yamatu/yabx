@@ -36,6 +36,33 @@ func (c *Controller) normalizedPushInterval(interval time.Duration) time.Duratio
 	return interval
 }
 
+// defaultPanelPullInterval is used when the panel reports no usable pull
+// interval. The panel admin form accepts 0 for server_pull_interval, and zero
+// would make time.AfterFunc fire immediately: the monitor would re-arm itself
+// with no delay, polling the panel in a tight loop and filling the journal.
+const defaultPanelPullInterval = 60 * time.Second
+
+// minPanelPullInterval is the shortest pull cycle accepted, so a small but non
+// zero panel value cannot turn into a request loop either.
+const minPanelPullInterval = 10 * time.Second
+
+func (c *Controller) normalizedPullInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		log.WithField("tag", c.getTag()).Warnf(
+			"Panel pull interval %s is not usable, using %s", interval, defaultPanelPullInterval)
+		return defaultPanelPullInterval
+	}
+
+	if interval < minPanelPullInterval {
+		log.WithField("tag", c.getTag()).Warnf(
+			"Panel pull interval %s is below %s, raising it to %s",
+			interval, minPanelPullInterval, minPanelPullInterval)
+		return minPanelPullInterval
+	}
+
+	return interval
+}
+
 // retryNodeReload forgets the cached node config so the next pull returns it
 // again. Without it a half applied reload is never retried: the panel answers
 // 304 (ETag match) or the exact same body hash from then on, and the node would
@@ -139,7 +166,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 
 	// fetch node info task
 	c.nodeInfoMonitorPeriodic = &task.Task{
-		Interval: node.PullInterval,
+		Interval: c.normalizedPullInterval(node.PullInterval),
 		Execute:  c.nodeInfoMonitor,
 	}
 	// fetch user list task
@@ -284,9 +311,9 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			return nil
 		}
 		// Check interval
-		if c.nodeInfoMonitorPeriodic.Interval != newN.PullInterval &&
-			newN.PullInterval != 0 {
-			c.nodeInfoMonitorPeriodic.Interval = newN.PullInterval
+		newPullInterval := c.normalizedPullInterval(newN.PullInterval)
+		if c.nodeInfoMonitorPeriodic.Interval != newPullInterval {
+			c.nodeInfoMonitorPeriodic.Interval = newPullInterval
 			c.nodeInfoMonitorPeriodic.Close()
 			_ = c.nodeInfoMonitorPeriodic.Start(false)
 		}

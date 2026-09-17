@@ -7,6 +7,40 @@ import (
 	"github.com/InazumaV/V2bX/api/panel"
 )
 
+func TestNormalizedPullIntervalNeverSpins(t *testing.T) {
+	cases := []struct {
+		name     string
+		interval time.Duration
+		want     time.Duration
+	}{
+		// time.AfterFunc(0) fires immediately, so a zero interval would make the
+		// node info monitor poll the panel in a tight loop.
+		{"zero interval", 0, defaultPanelPullInterval},
+		{"negative interval", -5 * time.Second, defaultPanelPullInterval},
+		{"tiny interval", time.Second, minPanelPullInterval},
+		{"below minimum", 5 * time.Second, minPanelPullInterval},
+		{"exact minimum", minPanelPullInterval, minPanelPullInterval},
+		{"configured interval", 60 * time.Second, 60 * time.Second},
+		{"long interval", 10 * time.Minute, 10 * time.Minute},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Controller{apiClient: &panel.Client{PanelType: "Xboard"}}
+			if got := c.normalizedPullInterval(tc.interval); got != tc.want {
+				t.Fatalf("normalizedPullInterval(%s) = %s, want %s", tc.interval, got, tc.want)
+			}
+		})
+	}
+
+	for _, interval := range []time.Duration{0, -time.Hour, time.Nanosecond, time.Millisecond} {
+		c := &Controller{apiClient: &panel.Client{PanelType: "Xboard"}}
+		if got := c.normalizedPullInterval(interval); got <= 0 {
+			t.Fatalf("normalizedPullInterval(%s) = %s, must be positive", interval, got)
+		}
+	}
+}
+
 func TestNormalizedPushIntervalKeepsOnlineStatusWindow(t *testing.T) {
 	cases := []struct {
 		name      string
