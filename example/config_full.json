@@ -64,9 +64,12 @@
         "bufferSize": 4
       },
       // Inbound配置文件目录
+      // 留空表示不用自定义入站（custom_inbound.json 里的 socks 入站会监听端口，需要时再显式指定）
       "InboundConfigPath": "",
       // Outbound配置文件目录
-      "OutboundConfigPath": ""
+      // route.json 里引用的 block / IPv4_out / IPv6_out 就定义在这个文件里；
+      // 不写这一项时，若 AssetPath 下存在 custom_outbound.json 会自动加载
+      "OutboundConfigPath": "/etc/V2bX/custom_outbound.json"
     }
   ],
   "Nodes": [

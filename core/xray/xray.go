@@ -126,15 +126,25 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 		inBoundConfig = append(inBoundConfig, oc)
 	}
 	// Custom Outbound config
+	//
+	// When the config does not state OutboundConfigPath, the custom_outbound.json
+	// shipped next to AssetPath is used instead. The default route.json refers to
+	// the tags defined there (block, IPv4_out, IPv6_out) and xray drops every
+	// connection that matches a rule with a missing tag, so leaving those tags
+	// undefined breaks the node and writes a warning per connection.
 	var coreCustomOutboundConfig []coreConf.OutboundDetourConfig
-	if c.OutboundConfigPath != "" {
-		data, err := os.ReadFile(c.OutboundConfigPath)
+	outboundConfigPath, outboundPathDetected := c.ResolveOutboundConfigPath()
+	if outboundConfigPath != "" {
+		data, err := os.ReadFile(outboundConfigPath)
 		if err != nil {
 			log.WithField("err", err).Panic("Failed to read Custom Outbound config file")
 		} else {
 			if err = json.Unmarshal(data, &coreCustomOutboundConfig); err != nil {
 				log.WithField("err", err).Panic("Failed to unmarshal Custom Outbound config")
 			}
+		}
+		if outboundPathDetected {
+			log.Infof("OutboundConfigPath is not set, loaded custom outbounds from %s", outboundConfigPath)
 		}
 	}
 	var outBoundConfig []*core.OutboundHandlerConfig
@@ -145,7 +155,7 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 		}
 		outBoundConfig = append(outBoundConfig, oc)
 	}
-	validateRouteOutboundReferences(c.RouteConfigPath, coreRouterConfig, c.OutboundConfigPath, coreCustomOutboundConfig)
+	validateRouteOutboundReferences(c.RouteConfigPath, coreRouterConfig, outboundConfigPath, coreCustomOutboundConfig)
 	// Policy config
 	levelPolicyConfig := parseConnectionConfig(c.ConnectionConfig)
 	corePolicyConfig := &coreConf.PolicyConfig{}
@@ -239,14 +249,14 @@ func validateRouteOutboundReferences(routeConfigPath string, routeConfig *coreCo
 	}
 	outboundSource := outboundConfigPath
 	if strings.TrimSpace(outboundSource) == "" {
-		outboundSource = "OutboundConfigPath"
+		outboundSource = "OutboundConfigPath, e.g. a custom_outbound.json next to AssetPath"
 	}
 
 	log.WithFields(log.Fields{
 		"routeConfigPath":     routeConfigPath,
 		"outboundConfigPath":  outboundConfigPath,
 		"missingOutboundTags": strings.Join(tags, ", "),
-	}).Warnf("Route config %s references outbound tag(s) [%s] that are not loaded. Load matching outbound definitions via %s or remove those route rules to avoid repeated 'non existing outTag' warnings.", routeSource, strings.Join(tags, ", "), outboundSource)
+	}).Warnf("Route config %s references outbound tag(s) [%s] that are not loaded: every connection matching those rules is dropped with a 'non existing outTag' warning. Define them via %s or remove the rules.", routeSource, strings.Join(tags, ", "), outboundSource)
 }
 
 func collectConfiguredOutboundTags(outboundConfigs []coreConf.OutboundDetourConfig) map[string]struct{} {
