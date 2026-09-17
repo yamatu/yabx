@@ -515,6 +515,9 @@ Description=V2bX Service
 Documentation=https://github.com/yamatu/yabx
 After=network-online.target nss-lookup.target
 Wants=network-online.target
+# A permanently broken config must not be restarted forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple

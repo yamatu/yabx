@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 
+	"github.com/InazumaV/V2bX/common/loghook"
 	"github.com/InazumaV/V2bX/conf"
 	vCore "github.com/InazumaV/V2bX/core"
 	"github.com/InazumaV/V2bX/limiter"
@@ -38,23 +41,51 @@ func init() {
 }
 
 func serverHandle(_ *cobra.Command, _ []string) {
+	if err := runServer(); err != nil {
+		log.WithField("err", err).Error("V2bX server exited with an error")
+		// Exit non zero so systemd sees a failure. Returning normally used to
+		// leave the unit inactive with Restart=on-failure doing nothing, so a
+		// node that could not start looked like a clean shutdown.
+		os.Exit(1)
+	}
+}
+
+// setLogLevel applies the configured level. Xray spells two levels differently
+// than logrus, and an unknown value used to leave the previous level in place
+// without telling anyone.
+func setLogLevel(level string) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "info":
+		log.SetLevel(log.InfoLevel)
+	case "trace":
+		log.SetLevel(log.TraceLevel)
+	case "debug":
+		log.SetLevel(log.DebugLevel)
+	case "warn", "warning":
+		log.SetLevel(log.WarnLevel)
+	case "error":
+		log.SetLevel(log.ErrorLevel)
+	case "fatal":
+		log.SetLevel(log.FatalLevel)
+	case "panic":
+		log.SetLevel(log.PanicLevel)
+	default:
+		log.SetLevel(log.InfoLevel)
+		log.WithField("level", level).Warn("Unknown log level, using info")
+	}
+}
+
+func runServer() error {
 	showVersion()
 	c := conf.New()
 	err := c.LoadFromPath(config)
 	if err != nil {
-		log.WithField("err", err).Error("Load config file failed")
-		return
+		return fmt.Errorf("load config file failed: %w", err)
 	}
-	switch c.LogConfig.Level {
-	case "debug":
-		log.SetLevel(log.DebugLevel)
-	case "info":
-		log.SetLevel(log.InfoLevel)
-	case "warn":
-		log.SetLevel(log.WarnLevel)
-	case "error":
-		log.SetLevel(log.ErrorLevel)
-	}
+	setLogLevel(c.LogConfig.Level)
+	// Collapse identical entries: one misconfigured panel or route can emit the
+	// same error on every connection or every pull cycle.
+	loghook.Install(log.StandardLogger(), loghook.DefaultWindow, log.WarnLevel)
 	if c.LogConfig.Output != "" {
 		w := &lumberjack.Logger{
 			Filename:   c.LogConfig.Output,
@@ -69,21 +100,18 @@ func serverHandle(_ *cobra.Command, _ []string) {
 	log.Info("Start V2bX...")
 	vc, err := vCore.NewCore(c.CoresConfig)
 	if err != nil {
-		log.WithField("err", err).Error("new core failed")
-		return
+		return fmt.Errorf("new core failed: %w", err)
 	}
 	err = vc.Start()
 	if err != nil {
-		log.WithField("err", err).Error("Start core failed")
-		return
+		return fmt.Errorf("start core failed: %w", err)
 	}
 	defer vc.Close()
 	log.Info("Core ", vc.Type(), " started")
 	nodes := node.New()
 	err = nodes.Start(c.NodeConfig, vc)
 	if err != nil {
-		log.WithField("err", err).Error("Run nodes failed")
-		return
+		return fmt.Errorf("run nodes failed: %w", err)
 	}
 	log.Info("Nodes started")
 	xdns := os.Getenv("XRAY_DNS_PATH")
@@ -116,8 +144,7 @@ func serverHandle(_ *cobra.Command, _ []string) {
 			runtime.GC()
 		})
 		if err != nil {
-			log.WithField("err", err).Error("start watch failed")
-			return
+			return fmt.Errorf("start watch failed: %w", err)
 		}
 	}
 	// clear memory
@@ -128,4 +155,6 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		signal.Notify(osSignals, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
 		<-osSignals
 	}
+
+	return nil
 }
