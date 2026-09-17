@@ -1,0 +1,46 @@
+name: Installer
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - "install.sh"
+      - "initconfig.sh"
+      - "acme_cf.sh"
+      - "V2bX.sh"
+      - "scripts/**"
+      - "example/**"
+      - ".github/workflows/installer.yml"
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+    paths:
+      - "install.sh"
+      - "initconfig.sh"
+      - "acme_cf.sh"
+      - "V2bX.sh"
+      - "scripts/**"
+      - "example/**"
+      - ".github/workflows/installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: Installer scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check shell syntax
+        run: |
+          for script in install.sh initconfig.sh acme_cf.sh V2bX.sh scripts/install_test.sh; do
+            bash -n "$script"
+            echo "$script: syntax ok"
+          done
+
+      # The tests run in a temporary directory: no root, no network, no systemd.
+      - name: Test the config file handling
+        run: bash scripts/install_test.sh

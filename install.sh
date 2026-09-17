@@ -4,12 +4,20 @@ set -euo pipefail
 REPO_OWNER="yamatu"
 REPO_NAME="yabx"
 BIN_NAME="V2bX"
-INSTALL_DIR="/usr/local/V2bX"
-CONFIG_DIR="/etc/V2bX"
-SERVICE_FILE="/etc/systemd/system/V2bX.service"
-INSTALL_MODE="release"
-VERSION=""
-SOURCE_REF="main"
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/V2bX}"
+CONFIG_DIR="${CONFIG_DIR:-/etc/V2bX}"
+SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/V2bX.service}"
+INSTALL_MODE="${INSTALL_MODE:-release}"
+VERSION="${VERSION:-}"
+SOURCE_REF="${SOURCE_REF:-main}"
+
+# Sidecar configs that are copied into CONFIG_DIR. They are never replaced
+# silently: an update asks first unless --configs says otherwise. config.json is
+# not in this list, it holds the node credentials and is only ever created.
+CONFIG_TEMPLATES="dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json xhttp_template.conf"
+CONFIG_MODE="ask"
+CONFIGS_ONLY="0"
+VERSION_ARG=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -426,6 +434,238 @@ ensure_example_asset() {
   fi
 }
 
+# ---- sidecar configs -------------------------------------------------------
+
+print_usage() {
+  cat <<'EOF'
+V2bX installer
+
+Usage: install.sh [version] [options]
+
+Options:
+  --configs=keep       never replace an existing sidecar config file
+  --configs=ask        ask before replacing files that differ (default)
+  --configs=overwrite  replace every file that differs, keeping a backup
+  --configs-only       only refresh the files in /etc/V2bX, do not touch the binary
+  -h, --help           show this help
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --configs=*)
+        CONFIG_MODE="${1#*=}"
+        ;;
+      --configs)
+        shift
+        CONFIG_MODE="${1:-ask}"
+        ;;
+      --configs-only)
+        CONFIGS_ONLY="1"
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      -*)
+        log_error "Unknown option: $1"
+        print_usage
+        exit 1
+        ;;
+      *)
+        VERSION_ARG="$1"
+        ;;
+    esac
+    shift
+  done
+
+  case "$CONFIG_MODE" in
+    keep|ask|overwrite) ;;
+    *)
+      log_error "Invalid --configs value: $CONFIG_MODE (expected keep, ask or overwrite)"
+      exit 1
+      ;;
+  esac
+}
+
+# Diff summary of the installed file against the template, e.g. "+2 -1".
+config_diff_summary() {
+  local current="$1"
+  local fresh="$2"
+  local added removed
+
+  added="$(diff "$current" "$fresh" 2>/dev/null | grep -c '^>' || true)"
+  removed="$(diff "$current" "$fresh" 2>/dev/null | grep -c '^<' || true)"
+  printf "+%s -%s" "${added:-0}" "${removed:-0}"
+}
+
+# Echo the path of the template shipped by this version. The release package is
+# unpacked into INSTALL_DIR, everything else is fetched like install_assets does.
+fresh_template_path() {
+  local ref="$1"
+  local file="$2"
+  local workdir="$3"
+
+  if [[ -f "$INSTALL_DIR/$file" ]]; then
+    printf '%s' "$INSTALL_DIR/$file"
+    return 0
+  fi
+
+  if [[ "$file" == "xhttp_template.conf" ]]; then
+    write_default_xhttp_template "$workdir/$file"
+    printf '%s' "$workdir/$file"
+    return 0
+  fi
+
+  mkdir -p "$INSTALL_DIR"
+  ensure_example_asset "$ref" "$file" >/dev/null 2>&1 || true
+  if [[ -f "$INSTALL_DIR/$file" ]]; then
+    printf '%s' "$INSTALL_DIR/$file"
+    return 0
+  fi
+
+  return 1
+}
+
+# Read an answer from the terminal only. When the script is piped (curl | bash)
+# stdin holds the script itself, so reading from it would swallow the rest of
+# the installation.
+ask_choice() {
+  local prompt="$1"
+  local fallback="$2"
+  local answer=""
+
+  if [[ ! -t 0 ]]; then
+    printf '%s' "$fallback"
+    return 0
+  fi
+
+  read -r -p "$prompt" answer </dev/tty || answer=""
+  if [[ -z "$answer" ]]; then
+    printf '%s' "$fallback"
+  else
+    printf '%s' "$answer"
+  fi
+}
+
+confirm_overwrite() {
+  local file="$1"
+  local answer
+
+  answer="$(ask_choice "Overwrite $file with the new template? [y/N]: " "n")"
+  case "$answer" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Copy the template over the installed file, keeping the old file in backup_dir.
+replace_config_file() {
+  local ref="$1"
+  local workdir="$2"
+  local file="$3"
+  local backup_dir="$4"
+  local fresh
+
+  fresh="$(fresh_template_path "$ref" "$file" "$workdir")" || return 1
+
+  mkdir -p "$backup_dir"
+  cp -f "$CONFIG_DIR/$file" "$backup_dir/$file"
+  cp -f "$fresh" "$CONFIG_DIR/$file"
+  log_info "Replaced $CONFIG_DIR/$file (previous file saved in $backup_dir)"
+}
+
+sync_config_templates() {
+  local ref="${1:-main}"
+  local mode="${2:-ask}"
+  local workdir file fresh choice backup_dir=""
+  # Space separated lists: every managed file name is a single word, and plain
+  # strings avoid the empty array pitfalls of older bash versions.
+  local missing=""
+  local differ=""
+  local replaced="0"
+
+  mkdir -p "$CONFIG_DIR"
+  workdir="$(mktemp -d /tmp/v2bx-config.XXXXXX)"
+
+  for file in $CONFIG_TEMPLATES; do
+    fresh="$(fresh_template_path "$ref" "$file" "$workdir")" || continue
+    if [[ ! -f "$CONFIG_DIR/$file" ]]; then
+      missing="$missing $file"
+    elif ! cmp -s "$CONFIG_DIR/$file" "$fresh"; then
+      differ="$differ $file"
+    fi
+  done
+
+  # A file that is not installed yet cannot conflict with anything.
+  for file in $missing; do
+    fresh="$(fresh_template_path "$ref" "$file" "$workdir")" || continue
+    cp -f "$fresh" "$CONFIG_DIR/$file"
+    log_info "Created $CONFIG_DIR/$file"
+  done
+
+  if [[ -z "${differ// /}" ]]; then
+    rm -rf "$workdir"
+    return 0
+  fi
+
+  log_warn "These files in $CONFIG_DIR differ from the templates of this release:"
+  for file in $differ; do
+    fresh="$(fresh_template_path "$ref" "$file" "$workdir")" || continue
+    printf "  %-26s %s\n" "$file" "$(config_diff_summary "$CONFIG_DIR/$file" "$fresh")"
+  done
+  log_info "config.json is never replaced: it holds the node credentials."
+
+  case "$mode" in
+    keep)
+      log_info "Keeping the existing files (--configs=keep)"
+      ;;
+    overwrite)
+      backup_dir="$CONFIG_DIR/backup-$(date +%Y%m%d-%H%M%S)"
+      for file in $differ; do
+        replace_config_file "$ref" "$workdir" "$file" "$backup_dir" && replaced=$((replaced + 1))
+      done
+      ;;
+    *)
+      if [[ ! -t 0 ]]; then
+        log_warn "Not running interactively, keeping the existing files (use --configs=overwrite to replace them)"
+      else
+        choice="$(ask_choice "Replace them with the new templates?
+  [1] keep the existing files (default)
+  [2] replace every file above (a backup is kept)
+  [3] decide per file
+Select [1]: " "1")"
+        case "$choice" in
+          2)
+            backup_dir="$CONFIG_DIR/backup-$(date +%Y%m%d-%H%M%S)"
+            for file in $differ; do
+              replace_config_file "$ref" "$workdir" "$file" "$backup_dir" && replaced=$((replaced + 1))
+            done
+            ;;
+          3)
+            backup_dir="$CONFIG_DIR/backup-$(date +%Y%m%d-%H%M%S)"
+            for file in $differ; do
+              if confirm_overwrite "$file"; then
+                replace_config_file "$ref" "$workdir" "$file" "$backup_dir" && replaced=$((replaced + 1))
+              fi
+            done
+            ;;
+          *)
+            log_info "Keeping the existing files"
+            ;;
+        esac
+      fi
+      ;;
+  esac
+
+  if [[ "$replaced" -gt 0 ]]; then
+    log_info "Replaced $replaced file(s), review the differences before restarting the service"
+  fi
+
+  rm -rf "$workdir"
+}
+
 install_assets() {
   local ref="${1:-main}"
   mkdir -p "$CONFIG_DIR"
@@ -440,21 +680,10 @@ install_assets() {
     cp -f "$INSTALL_DIR/geosite.dat" "$CONFIG_DIR/geosite.dat"
   fi
 
+  # config.json holds the node credentials: create it, never replace it.
   copy_if_missing "$INSTALL_DIR/config.json" "$CONFIG_DIR/config.json"
-  copy_if_missing "$INSTALL_DIR/dns.json" "$CONFIG_DIR/dns.json"
-  copy_if_missing "$INSTALL_DIR/route.json" "$CONFIG_DIR/route.json"
-  copy_if_missing "$INSTALL_DIR/custom_outbound.json" "$CONFIG_DIR/custom_outbound.json"
-  copy_if_missing "$INSTALL_DIR/custom_inbound.json" "$CONFIG_DIR/custom_inbound.json"
-  copy_if_missing "$INSTALL_DIR/config_xhttp_reality.json" "$CONFIG_DIR/config_xhttp_reality.json"
-  copy_if_missing "$INSTALL_DIR/config_naive.json" "$CONFIG_DIR/config_naive.json"
 
-  if [[ ! -f "$CONFIG_DIR/xhttp_template.conf" ]]; then
-    if [[ -f "$INSTALL_DIR/xhttp_template.conf" ]]; then
-      cp -f "$INSTALL_DIR/xhttp_template.conf" "$CONFIG_DIR/xhttp_template.conf"
-    else
-      write_default_xhttp_template "$CONFIG_DIR/xhttp_template.conf"
-    fi
-  fi
+  sync_config_templates "$ref" "$CONFIG_MODE"
 }
 
 install_manager_scripts() {
@@ -537,11 +766,22 @@ EOF
 }
 
 main() {
+  parse_args "$@"
+
+  # --configs-only refreshes the files in CONFIG_DIR and nothing else, which is
+  # what an existing installation needs when only the templates changed.
+  if [[ "$CONFIGS_ONLY" == "1" ]]; then
+    log_info "Refreshing the files in $CONFIG_DIR"
+    sync_config_templates "$SOURCE_REF" "$CONFIG_MODE"
+    log_info "Done"
+    return 0
+  fi
+
   require_root
   detect_release
   detect_asset_arch
   install_base
-  resolve_version "${1:-}"
+  resolve_version "$VERSION_ARG"
 
   local had_config="0"
   if [[ -f "$CONFIG_DIR/config.json" ]]; then
@@ -585,4 +825,7 @@ main() {
   log_info "Direct binary command: /usr/local/V2bX/V2bX"
 }
 
-main "$@"
+# Only run when executed, so the functions above can be sourced by tests.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
