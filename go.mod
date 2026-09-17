@@ -293,10 +293,31 @@ require (
 	github.com/vultr/govultr/v3 v3.9.1 // indirect
 	github.com/wyx2685/sing-vmess v0.0.0-20250208043059-9bd6d628dc1c // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	// reality is an indirect dependency of xray-core. It is pinned by hand because
-	// the version xray-core requires still rejects a handshake after 16 useless
-	// records, while this one tolerates 32 (reality's maxUselessRecords).
-	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f // indirect
+	// github.com/xtls/reality is used by xray-core and by the tests in core/xray.
+	// It is pinned by hand because the version xray-core requires still rejects a
+	// handshake after 16 useless records, while this one tolerates 32 (reality's
+	// maxUselessRecords).
+	//
+	// Do NOT pin anything between 9234c772ba8f and e1986a4d31ca: the background
+	// probe added in that range forgot the "defer target.Close()" of both of its
+	// goroutines, raced on the named return of CCSDetectConn.Write and panicked
+	// with "slice bounds out of range" in PostHandshakeRecordDetectConn.Read when
+	// the target answered with a truncated TLS record - the last one crashes the
+	// whole process, because nothing recovers a panic in that goroutine.
+	// e1986a4d31ca fixes all three and raises the target record buffer from
+	// 8 KiB to 17 KiB (XTLS/Xray-core#6356: dests such as www.microsoft.com
+	// answer with an 8273 byte certificate record, which aborted the handshake
+	// and showed up as a node that refuses connections). Both are covered by
+	// core/xray/reality_probe_test.go.
+	// 8cdf7bf9c7f0 and newer are deliberately NOT used: they reject ClientHellos
+	// that do not offer X25519MLKEM768 before X25519, which breaks old clients.
+	// Upstream still has two defects in this code path (see handlePostHandshakeMessage
+	// and CCSDetectConn in reality's conn.go / record_detect.go): MaxUselessRecords is
+	// only ever set by the probe, so while it is 0 a connection is dropped on the
+	// first post-handshake handshake message, and math.MaxInt removes the bound that
+	// keeps retryReadRecord's recursion finite. Neither is reachable with mainstream
+	// clients; do not hand-pin ahead of xray-core if you must avoid them.
+	github.com/xtls/reality v0.0.0-20260908045812-e1986a4d31ca
 	github.com/yandex-cloud/go-genproto v0.0.0-20241220122821-aeb3b05efd1c // indirect
 	github.com/yandex-cloud/go-sdk v0.0.0-20241220131134-2393e243c134 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
