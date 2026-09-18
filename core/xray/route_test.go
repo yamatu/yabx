@@ -60,6 +60,60 @@ func TestShippedRouteConfigResolvesAgainstShippedOutbounds(t *testing.T) {
 	}
 }
 
+// The node resolves through the xray resolver, which hands every upstream query
+// back to the router tagged with the DNS inbound ("dns_inbound"). Traffic with
+// that tag needs a rule of its own, and the rule has to be reached before the
+// geoip:private blackhole: the shipped dns.json uses "localhost" as a name
+// server, so lookups aimed at a loopback resolver used to be dropped before
+// they ever left the node.
+func TestShippedRouteConfigRoutesDNSInboundBeforeBlackholes(t *testing.T) {
+	_, ruleList := loadShippedRoute(t)
+	defined := collectConfiguredOutboundTags(loadShippedOutbounds(t))
+
+	type rule struct {
+		InboundTag  []string `json:"inboundTag"`
+		OutboundTag string   `json:"outboundTag"`
+	}
+	parse := func(index int) rule {
+		t.Helper()
+		var r rule
+		if err := json.Unmarshal(ruleList[index], &r); err != nil {
+			t.Fatalf("unmarshal rule %d of the shipped route.json: %v", index, err)
+		}
+		return r
+	}
+
+	for i := range ruleList {
+		current := parse(i)
+		if !containsString(current.InboundTag, "dns_inbound") {
+			continue
+		}
+		if current.OutboundTag == "" {
+			t.Fatalf("rule %d matches dns_inbound without an outboundTag, so resolver traffic is dropped", i)
+		}
+		if _, ok := defined[current.OutboundTag]; !ok {
+			t.Fatalf("rule %d sends dns_inbound to the undefined outbound %q", i, current.OutboundTag)
+		}
+		for j := 0; j < i; j++ {
+			if parse(j).OutboundTag == "block" {
+				t.Fatalf("the dns_inbound rule at %d is shadowed by the block rule at %d", i, j)
+			}
+		}
+		return
+	}
+
+	t.Fatal("the shipped route.json has no rule for the dns_inbound inbound")
+}
+
+func containsString(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestValidateRouteOutboundReferencesIsSilentWhenEveryTagIsDefined(t *testing.T) {
 	var buf bytes.Buffer
 	originalOutput := log.StandardLogger().Out

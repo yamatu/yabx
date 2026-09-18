@@ -3,6 +3,13 @@
     "rules": [
         {
             "type": "field",
+            "inboundTag": [
+                "dns_inbound"
+            ],
+            "outboundTag": "IPv4_out"
+        },
+        {
+            "type": "field",
             "outboundTag": "block",
             "ip": [
                 "geoip:private"
