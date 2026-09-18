@@ -7,6 +7,9 @@ BIN_NAME="V2bX"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/V2bX}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/V2bX}"
 SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/V2bX.service}"
+# Multi process mode: one process per node, started through this template unit.
+INSTANCE_TEMPLATE_FILE="${INSTANCE_TEMPLATE_FILE:-/etc/systemd/system/v2bx@.service}"
+NODES_DIR="${NODES_DIR:-${CONFIG_DIR}/nodes}"
 INSTALL_MODE="${INSTALL_MODE:-release}"
 VERSION="${VERSION:-}"
 SOURCE_REF="${SOURCE_REF:-main}"
@@ -761,8 +764,48 @@ LimitNOFILE=51200
 WantedBy=multi-user.target
 EOF
 
+  # Multi process mode. The template is only installed, never enabled: the
+  # migration is an explicit choice (menu item 16 / v2bx multi), and "V2bX split"
+  # writes /etc/V2bX/nodes/*.json. Keeping both units means switching back and
+  # forth costs one systemctl call and no reinstall.
+  mkdir -p "$NODES_DIR"
+  cat > "$INSTANCE_TEMPLATE_FILE" <<'EOF'
+[Unit]
+Description=V2bX node %i
+Documentation=https://github.com/yamatu/yabx
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+# One process per node: a node that cannot start must never stop the other
+# nodes, so an instance is restarted forever instead of being given up on.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/V2bX
+ExecStart=/usr/local/V2bX/V2bX server -c /etc/V2bX/nodes/%i.json
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=51200
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
   systemctl daemon-reload
   systemctl enable V2bX >/dev/null 2>&1 || true
+}
+
+# The instance names of the multi process configs in NODES_DIR.
+installed_instance_names() {
+  local dir="$1"
+  local file name
+  [[ -d "$dir" ]] || return 0
+  for file in "$dir"/*.json; do
+    [[ -e "$file" ]] || continue
+    name="${file##*/}"
+    printf '%s\n' "${name%.json}"
+  done
 }
 
 main() {
@@ -809,7 +852,33 @@ main() {
   install_manager_scripts "$script_ref"
   install_service
 
-  if [[ "$had_config" == "1" ]]; then
+  # Multi process mode: restart every instance that is running, and never start
+  # the single process unit. Starting V2bX as well would run the same nodes
+  # twice and fail on the ports that are already bound.
+  local instances=()
+  local name
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && instances+=("$name")
+  done < <(installed_instance_names "$NODES_DIR")
+
+  if [[ ${#instances[@]} -gt 0 ]]; then
+    local restarted="0"
+    for name in "${instances[@]}"; do
+      if ! systemctl is-active --quiet "v2bx@${name}"; then
+        continue
+      fi
+      if systemctl restart "v2bx@${name}"; then
+        restarted="1"
+        log_info "v2bx@${name} restarted"
+      else
+        log_warn "v2bx@${name} restart failed, run: journalctl -u v2bx@${name} -e --no-pager"
+      fi
+    done
+    if [[ "$restarted" == "0" ]]; then
+      log_info "Multi process mode: ${#instances[@]} instance(s) configured, none was running"
+      log_info "Start them with: systemctl enable --now v2bx@<node>"
+    fi
+  elif [[ "$had_config" == "1" ]]; then
     if systemctl restart V2bX; then
       log_info "V2bX restarted successfully"
     else

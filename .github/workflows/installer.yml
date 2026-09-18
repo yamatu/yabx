@@ -36,7 +36,7 @@ jobs:
 
       - name: Check shell syntax
         run: |
-          for script in install.sh initconfig.sh acme_cf.sh V2bX.sh scripts/install_test.sh; do
+          for script in install.sh initconfig.sh acme_cf.sh V2bX.sh scripts/install_test.sh scripts/menu_test.sh scripts/acme_test.sh; do
             bash -n "$script"
             echo "$script: syntax ok"
           done
@@ -44,3 +44,9 @@ jobs:
       # The tests run in a temporary directory: no root, no network, no systemd.
       - name: Test the config file handling
         run: bash scripts/install_test.sh
+
+      - name: Test the menu script
+        run: bash scripts/menu_test.sh
+
+      - name: Test the acme helper
+        run: bash scripts/acme_test.sh

@@ -76,6 +76,21 @@ bash <(curl -Ls https://raw.githubusercontent.com/yamatu/yabx/main/install.sh) v
 `13` 向导已支持 `vless + xhttp` 预设，以及 `naive (sing)` 预设。
 若选择 `CertMode=file`，向导会提示输入证书和私钥的实际路径（不再固定写死 `/etc/V2bX/`）。
 
+### 多进程模式（每节点一个进程）
+
+默认情况下所有节点跑在同一个进程里：任意节点启动失败会导致整个进程退出，面板更新 DNS 时也会触发全进程重启（所有节点瞬断）。
+从 v1.0.51 起可以切换成"每节点一个 systemd 实例"，节点之间互不影响：
+
+```bash
+v2bx multi split      # 只生成 /etc/V2bX/nodes/*.json，先看看拆出来的配置
+v2bx multi migrate    # 停掉 V2bX.service，改为 v2bx@<节点名> 实例
+v2bx multi status     # 查看当前模式和每个实例的状态
+v2bx multi rollback   # 随时回滚到单进程模式
+```
+
+`config.json` 不会被修改，`nodes/` 下每个节点有独立的配置、DNS 文件和日志，详见 [docs/MULTI_PROCESS.md](docs/MULTI_PROCESS.md)。
+默认安装、默认行为和单进程模式的用法完全不变。
+
 ### Cloudflare DNS acme.sh certificate
 
 The one-click script installs `/usr/local/V2bX/acme_cf.sh` and exposes it through `v2bx acme`.

@@ -195,6 +195,51 @@ else
 fi
 
 echo
+echo "== the systemd template of the multi process mode =="
+root="$(new_root)"
+mkdir -p "$root/bin"
+cat >"$root/bin/systemctl" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+chmod +x "$root/bin/systemctl"
+PATH_BEFORE="$PATH"
+PATH="$root/bin:$PATH"
+load_installer "$root"
+INSTANCE_TEMPLATE_FILE="$root/v2bx@.service"
+NODES_DIR="$CONFIG_DIR/nodes"
+install_service >/dev/null 2>&1
+PATH="$PATH_BEFORE"
+
+check_file_exists "the instance template is installed" "$INSTANCE_TEMPLATE_FILE"
+if grep -q 'ExecStart=/usr/local/V2bX/V2bX server -c /etc/V2bX/nodes/%i.json' "$INSTANCE_TEMPLATE_FILE"; then
+  ok "the template starts the per node config"
+else
+  fail "the template starts the per node config" "$(grep ExecStart "$INSTANCE_TEMPLATE_FILE")"
+fi
+grep -q '^StartLimitIntervalSec=0' "$INSTANCE_TEMPLATE_FILE" &&
+  ok "an instance is restarted forever" ||
+  fail "an instance is restarted forever" "the unit gives up after a few failures"
+grep -q '^StartLimitIntervalSec=60' "$SERVICE_FILE" &&
+  ok "the single process unit still gives up" ||
+  fail "the single process unit still gives up" "the limit is missing"
+if [[ -d "$NODES_DIR" ]]; then
+  ok "the nodes directory is created"
+else
+  fail "the nodes directory is created" "$NODES_DIR does not exist"
+fi
+
+echo
+echo "== the instance list of the multi process mode =="
+mkdir -p "$NODES_DIR/dns" "$NODES_DIR/log"
+printf '{}\n' >"$NODES_DIR/45678.json"
+printf '{}\n' >"$NODES_DIR/45679.json"
+printf '{}\n' >"$NODES_DIR/dns/dns_45678.json"
+printf '{}\n' >"$NODES_DIR/dns/dns_45679.json"
+check_eq "instances are the configs of the nodes" "$(installed_instance_names "$NODES_DIR" | sort | tr '\n' ' ')" "45678 45679 "
+check_eq "a missing directory lists nothing" "$(installed_instance_names "$NODES_DIR/gone" | tr '\n' ' ')" ""
+
+echo
 if [[ "$failures" -eq 0 ]]; then
   echo "all installer tests passed"
   exit 0

@@ -274,11 +274,33 @@ ensure_acme() {
 }
 
 reload_cmd() {
-  if has_cmd systemctl; then
-    printf 'systemctl restart %s.service' "$SERVICE_NAME"
-  else
+  local nodes_dir="${NODES_DIR:-${CONFIG_DIR}/nodes}"
+  local units=() file name
+
+  if ! has_cmd systemctl; then
     printf 'service %s restart' "$SERVICE_NAME"
+    return
   fi
+
+  # In the multi process mode the instances, not V2bX.service, serve the
+  # traffic, so only the instances that are in use are reloaded.
+  if [[ -d "$nodes_dir" ]]; then
+    for file in "$nodes_dir"/*.json; do
+      [[ -e "$file" ]] || continue
+      name="$(basename "$file" .json)"
+      systemctl is-enabled --quiet "v2bx@${name}" 2>/dev/null ||
+        systemctl is-active --quiet "v2bx@${name}" 2>/dev/null ||
+        continue
+      units+=("v2bx@${name}.service")
+    done
+  fi
+
+  if ((${#units[@]})); then
+    printf 'systemctl restart %s' "${units[*]}"
+    return
+  fi
+
+  printf 'systemctl restart %s.service' "$SERVICE_NAME"
 }
 
 install_cert() {
@@ -398,4 +420,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

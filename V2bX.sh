@@ -11,6 +11,10 @@ SERVICE_NAME="V2bX"
 BIN_PATH="${INSTALL_DIR}/V2bX"
 INIT_CONFIG_SCRIPT="${INSTALL_DIR}/initconfig.sh"
 ACME_CF_SCRIPT="${INSTALL_DIR}/acme_cf.sh"
+# Multi process mode: one process per node, one generated config per node.
+NODES_DIR="${CONFIG_DIR}/nodes"
+INSTANCE_PREFIX="v2bx@"
+INSTANCE_TEMPLATE_FILE="/etc/systemd/system/v2bx@.service"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -87,24 +91,41 @@ core_version_lines() {
 }
 
 show_status_line() {
-  check_status
-  case $? in
-    0)
-      echo -e "V2bX 状态: ${GREEN}运行中${PLAIN}"
-      ;;
-    1)
-      echo -e "V2bX 状态: ${YELLOW}未运行${PLAIN}"
-      ;;
-    2)
-      echo -e "V2bX 状态: ${RED}未安装${PLAIN}"
-      return
-      ;;
-  esac
+  if ! is_installed; then
+    echo -e "V2bX 状态: ${RED}未安装${PLAIN}"
+    return
+  fi
 
-  if is_enabled; then
-    echo -e "开机自启: ${GREEN}已开启${PLAIN}"
+  if multi_mode; then
+    echo -e "运行模式: ${GREEN}多进程${PLAIN} ($(instance_summary))"
+    if is_running || is_enabled; then
+      echo -e "提示: ${YELLOW}单进程服务 V2bX 仍处于运行/自启状态，两个模式不要同时开启${PLAIN}"
+      echo -e "      执行 v2bx multi rollback 或 systemctl disable --now V2bX"
+    fi
   else
-    echo -e "开机自启: ${YELLOW}未开启${PLAIN}"
+    check_status
+    case $? in
+      0)
+        echo -e "V2bX 状态: ${GREEN}运行中${PLAIN}"
+        ;;
+      1)
+        echo -e "V2bX 状态: ${YELLOW}未运行${PLAIN}"
+        ;;
+      2)
+        echo -e "V2bX 状态: ${RED}未安装${PLAIN}"
+        return
+        ;;
+    esac
+
+    if is_enabled; then
+      echo -e "开机自启: ${GREEN}已开启${PLAIN}"
+    else
+      echo -e "开机自启: ${YELLOW}未开启${PLAIN}"
+    fi
+
+    if multi_configs_exist; then
+      echo -e "提示: 检测到每节点配置文件，可执行 v2bx multi migrate 切换为多进程模式"
+    fi
   fi
 
   local versions="" line
@@ -115,6 +136,466 @@ show_status_line() {
   if [[ -n "$versions" ]]; then
     echo -e "内核版本: ${versions}"
   fi
+}
+
+# ---------------------------------------------------------------- multi process
+# One process per node. The reason to prefer it over one process with several
+# nodes: updateDNSConfig rewrites the DNS file of a node on every reload and the
+# config watcher restarts the process when that file changes, so in one process a
+# single node restarts every other node. Separate processes also isolate a crash
+# and the CPU and memory of one node from the others.
+
+# The instance names of the generated per node configs in NODES_DIR.
+instance_names() {
+  local dir="$NODES_DIR" file name
+  [[ -d "$dir" ]] || return 0
+  for file in "$dir"/*.json; do
+    [[ -e "$file" ]] || continue
+    name="${file##*/}"
+    printf '%s\n' "${name%.json}"
+  done
+}
+
+# Generated per node configs exist, no matter whether they are running.
+multi_configs_exist() {
+  local name
+  name="$(instance_names | head -n 1)"
+  [[ -n "$name" ]]
+}
+
+instance_active() {
+  has_cmd systemctl && systemctl is-active --quiet "${INSTANCE_PREFIX}$1"
+}
+
+instance_enabled() {
+  has_cmd systemctl && systemctl is-enabled --quiet "${INSTANCE_PREFIX}$1"
+}
+
+# The mode the host is actually in: generated configs are not enough, at least
+# one instance has to be running or enabled.
+multi_mode() {
+  if ! has_cmd systemctl; then
+    return 1
+  fi
+  local name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if instance_active "$name" || instance_enabled "$name"; then
+      return 0
+    fi
+  done < <(instance_names)
+  return 1
+}
+
+instance_summary() {
+  local total=0 running=0 name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    total=$((total + 1))
+    if instance_active "$name"; then
+      running=$((running + 1))
+    fi
+  done < <(instance_names)
+  printf '%s 个实例, %s 运行中' "$total" "$running"
+}
+
+show_instances_status() {
+  local name state boot
+  if ! multi_configs_exist; then
+    warn "未找到每节点配置文件 ($NODES_DIR)"
+    return 1
+  fi
+  echo "实例状态:"
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if instance_active "$name"; then
+      state="${GREEN}运行中${PLAIN}"
+    else
+      state="${YELLOW}已停止${PLAIN}"
+    fi
+    if instance_enabled "$name"; then
+      boot="开机自启"
+    else
+      boot="未自启"
+    fi
+    printf "  %-28s %b  (%s)\n" "$name" "$state" "$boot"
+  done < <(instance_names)
+  echo
+  echo "配置目录: $NODES_DIR"
+  echo "查看日志: journalctl -u ${INSTANCE_PREFIX}<节点名> -e --no-pager"
+}
+
+# Instances that are enabled but whose config file is gone: they can only fail.
+warn_stale_instances() {
+  local names="" name listed
+  if ! has_cmd systemctl; then
+    return 0
+  fi
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    listed="${name#${INSTANCE_PREFIX}}"
+    listed="${listed%.service}"
+    if [[ ! -f "$NODES_DIR/${listed}.json" ]]; then
+      names+="${names:+ }${listed}"
+    fi
+  done < <(systemctl list-unit-files "${INSTANCE_PREFIX}*.service" --no-legend 2>/dev/null | awk '{print $1}')
+  if [[ -n "$names" ]]; then
+    warn "以下实例已启用但配置已不存在: $names"
+    warn "可执行: systemctl disable --now ${INSTANCE_PREFIX}<节点名>"
+  fi
+}
+
+# Runs one action on every instance.
+foreach_instance() {
+  local action="$1" name failed="0"
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    case "$action" in
+      start) systemctl start "${INSTANCE_PREFIX}${name}" ;;
+      stop) systemctl stop "${INSTANCE_PREFIX}${name}" ;;
+      restart) systemctl restart "${INSTANCE_PREFIX}${name}" ;;
+      enable) systemctl enable "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 ;;
+      disable) systemctl disable "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 ;;
+    esac || {
+      error "${INSTANCE_PREFIX}${name} ${action} 失败"
+      failed="1"
+    }
+  done < <(instance_names)
+  if [[ "$failed" == "1" ]]; then
+    warn "有实例执行 ${action} 失败，请检查上面的日志"
+    return 1
+  fi
+  case "$action" in
+    start) info "已启动全部实例" ;;
+    stop) info "已停止全部实例" ;;
+    restart) info "已重启全部实例" ;;
+    enable) info "已设置全部实例开机自启" ;;
+    disable) info "已取消全部实例开机自启" ;;
+  esac
+}
+
+# In multi process mode the single process unit is the wrong target for
+# start/stop/restart/status/log/enable/disable, so those actions are applied to
+# every instance instead. It must only be called after multi_mode returned 0.
+redirect_multi() {
+  case "$1" in
+    start | stop | restart | enable | disable)
+      foreach_instance "$1"
+      ;;
+    status)
+      show_instances_status
+      ;;
+    log)
+      local name
+      name="$(pick_instance)" || return 1
+      [[ -n "$name" ]] || return 1
+      instance_control log "$name"
+      ;;
+    *)
+      error "未知操作: $1"
+      return 1
+      ;;
+  esac
+}
+
+# Writes one config per node. The multi node config is never modified, so
+# switching back is one systemctl call.
+split_node_configs() {
+  local force="${1:-}"
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    error "未找到配置文件: $CONFIG_FILE"
+    return 1
+  fi
+  info "正在生成每节点配置文件 (每个节点一份 DNS 配置，互不影响)..."
+  if ! run_core_binary split -c "$CONFIG_FILE" -o "$NODES_DIR" $force; then
+    error "生成失败，配置未做任何改动"
+    return 1
+  fi
+}
+
+start_all_instances() {
+  local failed="0" name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if systemctl enable --now "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1; then
+      info "已启动 ${INSTANCE_PREFIX}${name}"
+    else
+      error "${INSTANCE_PREFIX}${name} 启动失败，查看: journalctl -u ${INSTANCE_PREFIX}${name} -e --no-pager"
+      failed="1"
+    fi
+  done < <(instance_names)
+  sleep 2
+  show_instances_status
+  if [[ "$failed" == "1" ]]; then
+    warn "有实例启动失败，可随时回退: v2bx multi rollback"
+  fi
+}
+
+migrate_to_multi() {
+  if ! ensure_installed; then
+    return 1
+  fi
+  if ! has_cmd systemctl; then
+    error "当前系统没有 systemd，无法使用多进程模式"
+    return 1
+  fi
+  if multi_mode; then
+    warn "已经处于多进程模式"
+    warn "修改了 $CONFIG_FILE 后重新生成请用: v2bx multi reload"
+    return 1
+  fi
+  if [[ ! -f "$INSTANCE_TEMPLATE_FILE" ]]; then
+    error "未找到 systemd 模板单元: $INSTANCE_TEMPLATE_FILE"
+    error "请先执行 v2bx update 更新安装脚本(会写入 v2bx@.service)"
+    return 1
+  fi
+
+  local ans force=""
+  read -r -p "将 $CONFIG_FILE 拆分为每节点一个进程，是否继续？[y/N]: " ans
+  if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+    warn "已取消"
+    return 0
+  fi
+  if multi_configs_exist; then
+    read -r -p "$NODES_DIR 已存在配置文件，是否覆盖？[y/N]: " ans
+    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+      warn "已取消"
+      return 0
+    fi
+    force="--force"
+  fi
+
+  if ! split_node_configs "$force"; then
+    return 1
+  fi
+  if ! multi_configs_exist; then
+    error "没有生成任何配置文件，已中止"
+    return 1
+  fi
+
+  info "停止单进程服务 V2bX (配置文件不会被修改)..."
+  systemctl stop V2bX >/dev/null 2>&1 || true
+  systemctl disable V2bX >/dev/null 2>&1 || true
+
+  start_all_instances
+  warn_stale_instances
+  info "回退命令: v2bx multi rollback"
+}
+
+reapply_split() {
+  if ! ensure_installed; then
+    return 1
+  fi
+  if ! split_node_configs "--force"; then
+    return 1
+  fi
+  local name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if instance_active "$name" || instance_enabled "$name"; then
+      systemctl restart "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 || \
+        error "${INSTANCE_PREFIX}${name} 重启失败，查看: journalctl -u ${INSTANCE_PREFIX}${name} -e --no-pager"
+    else
+      systemctl enable --now "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 || true
+    fi
+  done < <(instance_names)
+  warn_stale_instances
+  show_instances_status
+}
+
+rollback_to_single() {
+  if ! ensure_installed; then
+    return 1
+  fi
+  if ! multi_configs_exist; then
+    warn "当前不是多进程模式"
+    return 1
+  fi
+  local ans
+  read -r -p "停止所有 v2bx@ 实例并恢复单进程 V2bX？[Y/n]: " ans
+  if [[ -n "$ans" && ! "$ans" =~ ^[Yy]$ ]]; then
+    warn "已取消"
+    return 0
+  fi
+
+  local name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    systemctl disable --now "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 || \
+      systemctl stop "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 || true
+  done < <(instance_names)
+
+  if systemctl enable --now V2bX >/dev/null 2>&1; then
+    sleep 1
+    if is_running; then
+      info "已恢复单进程模式"
+    else
+      warn "V2bX 未启动，查看: v2bx log"
+    fi
+  else
+    error "恢复单进程模式失败，请执行: systemctl status V2bX"
+  fi
+  info "每节点配置保留在 $NODES_DIR (不会被删除)"
+}
+
+pick_instance() {
+  local names=() name i=1 choice
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && names+=("$line")
+  done < <(instance_names)
+  if [[ ${#names[@]} -eq 0 ]]; then
+    error "未找到实例，请先执行 v2bx multi migrate" >&2
+    return 1
+  fi
+  if [[ ${#names[@]} -eq 1 ]]; then
+    echo "${names[0]}"
+    return 0
+  fi
+  for name in "${names[@]}"; do
+    echo "  $i) $name"
+    i=$((i + 1))
+  done
+  read -r -p "请选择实例编号: " choice
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || ((choice < 1 || choice > ${#names[@]})); then
+    error "无效的选择" >&2
+    return 1
+  fi
+  echo "${names[$((choice - 1))]}"
+}
+
+instance_control() {
+  local action="$1" name="${2:-}"
+  if [[ -z "$name" ]]; then
+    name="$(pick_instance)" || return 1
+  fi
+  if [[ ! -f "$NODES_DIR/${name}.json" ]]; then
+    error "实例配置不存在: $NODES_DIR/${name}.json"
+    return 1
+  fi
+  case "$action" in
+    start)
+      systemctl start "${INSTANCE_PREFIX}${name}" || { error "启动失败"; return 1; }
+      info "${INSTANCE_PREFIX}${name} 已启动"
+      ;;
+    stop)
+      systemctl stop "${INSTANCE_PREFIX}${name}" || { error "停止失败"; return 1; }
+      info "${INSTANCE_PREFIX}${name} 已停止"
+      ;;
+    restart)
+      systemctl restart "${INSTANCE_PREFIX}${name}" || { error "重启失败"; return 1; }
+      sleep 1
+      if instance_active "$name"; then
+        info "${INSTANCE_PREFIX}${name} 已重启"
+      else
+        error "重启后实例未运行，查看: journalctl -u ${INSTANCE_PREFIX}${name} -e --no-pager"
+        return 1
+      fi
+      ;;
+    status)
+      systemctl status "${INSTANCE_PREFIX}${name}" --no-pager -l
+      ;;
+    log)
+      journalctl -u "${INSTANCE_PREFIX}${name}.service" -e --no-pager -f
+      ;;
+    enable)
+      systemctl enable "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 || { error "设置开机自启失败"; return 1; }
+      info "${INSTANCE_PREFIX}${name} 已设置开机自启"
+      ;;
+    disable)
+      systemctl disable "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 || { error "取消开机自启失败"; return 1; }
+      info "${INSTANCE_PREFIX}${name} 已取消开机自启"
+      ;;
+    *)
+      error "未知操作: $action"
+      return 1
+      ;;
+  esac
+}
+
+instance_menu() {
+  local name num
+  name="$(pick_instance)" || return 1
+  [[ -n "$name" ]] || return 1
+  echo "实例: $name"
+  echo "1. 启动"
+  echo "2. 停止"
+  echo "3. 重启"
+  echo "4. 状态"
+  echo "5. 查看日志 (Ctrl+C 退出)"
+  echo "6. 设置/取消开机自启"
+  echo "0. 返回"
+  read -r -p "请输入选择 [0-6]: " num
+  case "$num" in
+    1) instance_control start "$name" ;;
+    2) instance_control stop "$name" ;;
+    3) instance_control restart "$name" ;;
+    4) instance_control status "$name" ;;
+    5) instance_control log "$name" ;;
+    6)
+      if instance_enabled "$name"; then
+        instance_control disable "$name"
+      else
+        instance_control enable "$name"
+      fi
+      ;;
+    0) return 0 ;;
+    *) warn "请输入 0-6 的数字" ;;
+  esac
+}
+
+show_multi_menu() {
+  local num
+  while true; do
+    if [[ -t 1 ]] && has_cmd clear; then
+      clear
+    fi
+    cat <<'MENUEOF'
+V2bX 多进程模式 (每个节点一个进程)
+----------------------------------------
+1. 查看各实例状态
+2. 切换为多进程模式(拆分配置文件并启动实例)
+3. 重新生成配置并重启所有实例(修改 config.json 后使用)
+4. 回退到单进程模式
+5. 单个实例操作(启动/停止/重启/日志)
+6. 查看多进程模式说明
+0. 返回主菜单
+----------------------------------------
+MENUEOF
+    if multi_mode; then
+      echo -e "当前模式: ${GREEN}多进程${PLAIN} ($(instance_summary))"
+    else
+      echo -e "当前模式: ${YELLOW}单进程${PLAIN}"
+    fi
+    read -r -p "请输入选择 [0-6]: " num
+    case "$num" in
+      1) show_instances_status; pause_back ;;
+      2) migrate_to_multi; pause_back ;;
+      3) reapply_split; pause_back ;;
+      4) rollback_to_single; pause_back ;;
+      5) instance_menu; pause_back ;;
+      6) show_multi_help; pause_back ;;
+      0) return 0 ;;
+      *) warn "请输入 0-6 的数字"; pause_back ;;
+    esac
+  done
+}
+
+show_multi_help() {
+  cat <<'HELPEOF'
+多进程模式说明
+1) 每个节点一个进程: v2bx@<节点名>.service
+2) 每个进程使用 /etc/V2bX/nodes/<节点名>.json，并拥有自己的
+   DNS 配置 (nodes/dns/) 与日志 (nodes/log/)
+3) /etc/V2bX/config.json 不会被修改，回退只需恢复 V2bX 服务
+4) 切换: v2bx multi migrate / v2bx multi rollback
+5) 修改 config.json 后: v2bx multi reload
+6) 单个实例日志: journalctl -u v2bx@<节点名> -e --no-pager
+7) 节点数远多于机器核心数时不建议使用多进程模式
+
+为什么不建议两个模式同时开启:
+两个模式都会把节点监听在相同的端口上，同时运行会导致端口冲突,
+所以 migrate 会自动停止并禁用单进程的 V2bX 服务。
+HELPEOF
 }
 
 pause_back() {
@@ -185,6 +666,10 @@ run_core_binary() {
 }
 
 start_service() {
+  if multi_mode; then
+    redirect_multi start
+    return $?
+  fi
   if ! ensure_installed; then
     return 1
   fi
@@ -206,6 +691,10 @@ start_service() {
 }
 
 stop_service() {
+  if multi_mode; then
+    redirect_multi stop
+    return $?
+  fi
   if ! ensure_installed; then
     return 1
   fi
@@ -218,6 +707,10 @@ stop_service() {
 }
 
 restart_service() {
+  if multi_mode; then
+    redirect_multi restart
+    return $?
+  fi
   if ! ensure_installed; then
     return 1
   fi
@@ -235,6 +728,10 @@ restart_service() {
 }
 
 status_service() {
+  if multi_mode; then
+    redirect_multi status
+    return $?
+  fi
   if ! ensure_installed; then
     return 1
   fi
@@ -242,6 +739,10 @@ status_service() {
 }
 
 log_service() {
+  if multi_mode; then
+    redirect_multi log
+    return $?
+  fi
   if ! ensure_installed; then
     return 1
   fi
@@ -249,6 +750,10 @@ log_service() {
 }
 
 enable_service() {
+  if multi_mode; then
+    redirect_multi enable
+    return $?
+  fi
   if ! ensure_installed; then
     return 1
   fi
@@ -261,6 +766,10 @@ enable_service() {
 }
 
 disable_service() {
+  if multi_mode; then
+    redirect_multi disable
+    return $?
+  fi
   if ! ensure_installed; then
     return 1
   fi
@@ -308,6 +817,14 @@ edit_config() {
   fi
 
   "$editor" "$CONFIG_FILE"
+  if multi_mode; then
+    warn "当前是多进程模式，实例读取的是 $NODES_DIR/<节点名>.json"
+    read -r -p "是否重新生成每节点配置并重启所有实例？[Y/n]: " ans
+    if [[ -z "$ans" || "$ans" =~ ^[Yy]$ ]]; then
+      reapply_split
+    fi
+    return 0
+  fi
   read -r -p "配置已保存，是否立即重启 V2bX？[Y/n]: " ans
   if [[ -z "$ans" || "$ans" =~ ^[Yy]$ ]]; then
     restart_service
@@ -381,9 +898,15 @@ uninstall_v2bx() {
     return 0
   fi
 
+  local name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    systemctl disable --now "${INSTANCE_PREFIX}${name}" >/dev/null 2>&1 || true
+  done < <(instance_names)
   systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
   systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/V2bX.service
+  rm -f /etc/systemd/system/V2bX.service "$INSTANCE_TEMPLATE_FILE"
+  systemctl reset-failed "${INSTANCE_PREFIX}*" >/dev/null 2>&1 || true
   rm -rf "$CONFIG_DIR"
   rm -rf "$INSTALL_DIR"
   rm -f /usr/bin/v2bx /usr/bin/V2bX /usr/bin/v2bx-bin
@@ -402,6 +925,8 @@ v2bx 命令用法:
   v2bx uninstall       卸载
   v2bx start|stop|restart|status|log
   v2bx enable|disable
+  v2bx multi [action]  多进程模式: status|migrate|reload|rollback|menu
+                       单个实例: start|stop|restart|log|status [节点名]
   v2bx config          编辑 /etc/V2bX/config.json
   v2bx generate        配置向导生成 config.json
   v2bx acme [action]   Cloudflare DNS cert setup/issue/renew/status/edit
@@ -437,7 +962,8 @@ V2bX 管理菜单
 13. 配置向导(新建/重建 config.json, 含 xhttp / naive 预设)
 14. 协议示例说明(xhttp / naive)
 15. Cloudflare DNS ACME certificate
-16. 退出
+16. 多进程模式(每节点独立进程)
+17. 退出
 ----------------------------------------
 EOF
   show_status_line
@@ -446,7 +972,7 @@ EOF
 menu_loop() {
   while true; do
     show_menu
-    read -r -p "请输入选择 [0-16]: " num
+    read -r -p "请输入选择 [0-17]: " num
     case "$num" in
       0) edit_config; pause_back ;;
       1) run_install_script; pause_back ;;
@@ -468,8 +994,9 @@ menu_loop() {
       13) generate_config; pause_back ;;
       14) show_xhttp_help; pause_back ;;
       15) run_acme_manager setup; pause_back ;;
-      16) exit 0 ;;
-      *) warn "请输入 0-16 的数字"; pause_back ;;
+      16) show_multi_menu; pause_back ;;
+      17) exit 0 ;;
+      *) warn "请输入 0-17 的数字"; pause_back ;;
     esac
   done
 }
@@ -494,6 +1021,19 @@ main() {
       version) show_version || rc=$? ;;
       xhttp) show_xhttp_help || rc=$? ;;
       naive) show_xhttp_help || rc=$? ;;
+      multi|instances)
+        case "${2:-status}" in
+          status | list) show_instances_status || rc=$? ;;
+          migrate | split) migrate_to_multi || rc=$? ;;
+          reload | reapply) reapply_split || rc=$? ;;
+          rollback | single) rollback_to_single || rc=$? ;;
+          start | stop | restart | log | enable | disable)
+            instance_control "$2" "${3:-}" || rc=$?
+            ;;
+          menu) show_multi_menu || rc=$? ;;
+          *) show_multi_help ;;
+        esac
+        ;;
       server) run_core_binary "$@" || rc=$? ;;
       install) run_install_script "${2:-}" || rc=$? ;;
       update) run_install_script "${2:-}" || rc=$? ;;
@@ -506,4 +1046,7 @@ main() {
   menu_loop
 }
 
-main "$@"
+# Only run when executed, so the functions above can be sourced by tests.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
