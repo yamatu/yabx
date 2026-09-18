@@ -33,6 +33,11 @@ _/      _/      _/    _/    _/      _/
   _/      _/_/_/_/  _/_/_/    _/      _/        
                                                 `)
 	fmt.Printf("%s %s (%s) \n", codename, version, intro)
+	// One line per compiled kernel, so `V2bX version` and the startup banner name
+	// the cores this build carries. V2bX.sh greps these lines for its menu.
+	for _, coreVersion := range installedCoreVersions() {
+		fmt.Println(coreVersion)
+	}
 	//fmt.Printf("Supported cores: %s\n", strings.Join(vCore.RegisteredCore(), ", "))
 	// Warning
 	//fmt.Println(Warn("This version need V2board version >= 1.7.0."))

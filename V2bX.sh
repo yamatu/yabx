@@ -77,6 +77,15 @@ check_status() {
   return 1
 }
 
+# The installed kernels and their versions, read from the binary itself so
+# the menu cannot drift from what the build actually links.
+core_version_lines() {
+  if ! is_installed; then
+    return 0
+  fi
+  run_core_binary version 2>/dev/null | grep -E '^[a-z][a-z0-9]* v[0-9]' || true
+}
+
 show_status_line() {
   check_status
   case $? in
@@ -96,6 +105,15 @@ show_status_line() {
     echo -e "开机自启: ${GREEN}已开启${PLAIN}"
   else
     echo -e "开机自启: ${YELLOW}未开启${PLAIN}"
+  fi
+
+  local versions="" line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    versions+="${versions:+ / }$line"
+  done < <(core_version_lines)
+  if [[ -n "$versions" ]]; then
+    echo -e "内核版本: ${versions}"
   fi
 }
 
@@ -388,7 +406,7 @@ v2bx 命令用法:
   v2bx generate        配置向导生成 config.json
   v2bx acme [action]   Cloudflare DNS cert setup/issue/renew/status/edit
   v2bx x25519          生成 X25519 密钥
-  v2bx version         查看版本
+  v2bx version         查看版本(含内核)
   v2bx xhttp           显示 xhttp / naive 使用说明
   v2bx naive           显示 naive 使用说明
 EOF
@@ -415,7 +433,7 @@ V2bX 管理菜单
 9. 设置开机自启
 10. 取消开机自启
 11. 生成 X25519 密钥
-12. 查看 V2bX 版本
+12. 查看 V2bX / 内核版本
 13. 配置向导(新建/重建 config.json, 含 xhttp / naive 预设)
 14. 协议示例说明(xhttp / naive)
 15. Cloudflare DNS ACME certificate
