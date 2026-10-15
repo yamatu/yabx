@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/InazumaV/V2bX/common/sysmem"
 	"github.com/goccy/go-json"
 )
 
@@ -60,8 +61,26 @@ func NewXrayConfig() *XrayConfig {
 			ConnIdle:     30,
 			UplinkOnly:   2,
 			DownlinkOnly: 4,
-			BufferSize:   64,
+			BufferSize:   defaultXrayBufferSize(sysmem.Budget()),
 		},
+	}
+}
+
+// defaultXrayBufferSize is the per connection buffer limit in KB. Every
+// connection may hold it in both directions, so on a small machine a thousand
+// connections at 64 KB alone can take a few hundred MB.
+func defaultXrayBufferSize(budget uint64) int32 {
+	switch {
+	case budget == 0:
+		return 64
+	case budget <= 512*sysmem.MiB:
+		return 8
+	case budget <= 1024*sysmem.MiB:
+		return 16
+	case budget <= 2048*sysmem.MiB:
+		return 32
+	default:
+		return 64
 	}
 }
 

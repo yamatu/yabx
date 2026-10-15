@@ -1,33 +1,29 @@
 package core
 
 import (
-	"errors"
-
 	"github.com/InazumaV/V2bX/conf"
 )
 
-var (
-	cores = map[string]func(c *conf.CoreConfig) (Core, error){}
-)
-
-func NewCore(c []conf.CoreConfig) (Core, error) {
-	if len(c) < 0 {
-		return nil, errors.New("no have vail core")
-	}
-	// multi core
-	if len(c) > 1 {
-		return NewSelector(c)
-	}
-	// one core
-	if f, ok := cores[c[0].Type]; ok {
-		return f(&c[0])
-	} else {
-		return nil, errors.New("unknown core type")
-	}
+type registration struct {
+	new       func(c *conf.CoreConfig) (Core, error)
+	protocols []string
 }
 
-func RegisterCore(t string, f func(c *conf.CoreConfig) (Core, error)) {
-	cores[t] = f
+var (
+	cores = map[string]registration{}
+)
+
+// NewCore always returns a Selector, even for one core: the Selector fills in
+// Options.Core for nodes that only name a CoreName (or nothing), which the cores
+// themselves rely on.
+func NewCore(c []conf.CoreConfig) (Core, error) {
+	return NewSelector(c)
+}
+
+// RegisterCore registers a core type with the protocols it serves, so a core can
+// be chosen for a node without creating it first.
+func RegisterCore(t string, f func(c *conf.CoreConfig) (Core, error), protocols []string) {
+	cores[t] = registration{new: f, protocols: protocols}
 }
 
 func RegisteredCore() []string {

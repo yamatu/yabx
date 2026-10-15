@@ -27,8 +27,15 @@ import (
 
 var _ vCore.Core = (*Xray)(nil)
 
+var protocols = []string{
+	"vmess",
+	"vless",
+	"shadowsocks",
+	"trojan",
+}
+
 func init() {
-	vCore.RegisterCore("xray", New)
+	vCore.RegisterCore("xray", New, protocols)
 }
 
 // Xray Structure
@@ -214,12 +221,7 @@ func (c *Xray) Close() error {
 }
 
 func (c *Xray) Protocols() []string {
-	return []string{
-		"vmess",
-		"vless",
-		"shadowsocks",
-		"trojan",
-	}
+	return protocols
 }
 
 func (c *Xray) Type() string {

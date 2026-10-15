@@ -118,7 +118,8 @@ func buildSplitConfigs(raw []byte, outDir string) ([]splitFile, error) {
 
 		perCores := make([]map[string]json.RawMessage, 0, len(cores))
 		var copies []dnsCopy
-		for ci, core := range cores {
+		for _, ci := range splitNodeCores(node, cores) {
+			core := cores[ci]
 			copied := make(map[string]json.RawMessage, len(core))
 			for k, v := range core {
 				copied[k] = v
@@ -139,7 +140,10 @@ func buildSplitConfigs(raw []byte, outDir string) ([]splitFile, error) {
 			perCores = append(perCores, copied)
 		}
 
-		out := make(map[string]json.RawMessage, 3)
+		out := make(map[string]json.RawMessage, 4)
+		if encoded, err := json.Marshal(len(nodes)); err == nil {
+			out["Instances"] = encoded
+		}
 		if logRaw, ok := doc["Log"]; ok {
 			if rewritten, err := rewriteLogOutput(logRaw, outDir, name); err == nil {
 				out["Log"] = rewritten
@@ -168,6 +172,59 @@ func buildSplitConfigs(raw []byte, outDir string) ([]splitFile, error) {
 	}
 
 	return files, nil
+}
+
+// splitNodeCores returns the indexes of the cores a node can end up on, with the
+// rules the core Selector applies: CoreName matches the Name (or the Type of an
+// unnamed core), Core matches the Type. Every other core would only cost memory
+// in that process. A node that names neither, or whose settings live in an
+// Include file, keeps all of them; so does a name that matches nothing, which
+// leaves the error to the node at startup as before.
+func splitNodeCores(node map[string]json.RawMessage, cores []map[string]json.RawMessage) []int {
+	all := make([]int, len(cores))
+	for i := range cores {
+		all[i] = i
+	}
+	if _, ok := node["Include"]; ok {
+		return all
+	}
+
+	fields := node
+	if rawOptions, ok := node["Options"]; ok {
+		var options map[string]json.RawMessage
+		if err := json.Unmarshal(rawOptions, &options); err == nil {
+			fields = options
+		}
+	}
+	var coreName, coreType string
+	_ = json.Unmarshal(fields["CoreName"], &coreName)
+	_ = json.Unmarshal(fields["Core"], &coreType)
+
+	var picked []int
+	for i, core := range cores {
+		var name, typ string
+		_ = json.Unmarshal(core["Name"], &name)
+		_ = json.Unmarshal(core["Type"], &typ)
+		switch {
+		case coreName != "":
+			key := name
+			if key == "" {
+				key = typ
+			}
+			if key == coreName {
+				picked = append(picked, i)
+			}
+		case coreType != "":
+			if strings.EqualFold(typ, coreType) {
+				picked = append(picked, i)
+			}
+		}
+	}
+	if len(picked) == 0 {
+		return all
+	}
+
+	return picked
 }
 
 // rewriteLogOutput points the per node config at its own log file. An empty

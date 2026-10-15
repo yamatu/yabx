@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/InazumaV/V2bX/common/loghook"
+	"github.com/InazumaV/V2bX/common/startlock"
 	"github.com/InazumaV/V2bX/conf"
 	vCore "github.com/InazumaV/V2bX/core"
 	"github.com/InazumaV/V2bX/limiter"
@@ -22,6 +25,11 @@ var (
 	config string
 	watch  bool
 )
+
+// startLockWait bounds how long an instance waits for the others to finish
+// starting, so one instance stuck on an unreachable panel delays the rest by at
+// most this much.
+const startLockWait = 30 * time.Second
 
 var serverCommand = cobra.Command{
 	Use:   "server",
@@ -96,7 +104,17 @@ func runServer() error {
 		}
 		log.SetOutput(w)
 	}
+	applyMemoryLimit(c.Instances)
 	limiter.Init()
+	releaseStart := sync.OnceFunc(func() {})
+	if c.Instances > 1 {
+		release, locked := startlock.Acquire(startlock.Path(), startLockWait)
+		if !locked {
+			log.Warn("Another instance is still starting, starting anyway")
+		}
+		releaseStart = sync.OnceFunc(release)
+	}
+	defer releaseStart()
 	log.Info("Start V2bX...")
 	vc, err := vCore.NewCore(c.CoresConfig)
 	if err != nil {
@@ -114,6 +132,7 @@ func runServer() error {
 		return fmt.Errorf("run nodes failed: %w", err)
 	}
 	log.Info("Nodes started")
+	releaseStart()
 	xdns := os.Getenv("XRAY_DNS_PATH")
 	sdns := os.Getenv("SING_DNS_PATH")
 	if watch {
@@ -141,14 +160,15 @@ func runServer() error {
 				return
 			}
 			log.Info("Nodes restarted")
-			runtime.GC()
+			debug.FreeOSMemory()
 		})
 		if err != nil {
 			return fmt.Errorf("start watch failed: %w", err)
 		}
 	}
-	// clear memory
-	runtime.GC()
+	// Hand the startup garbage (config parsing, geo data) back to the OS now
+	// instead of whenever the background scavenger gets to it.
+	debug.FreeOSMemory()
 	// wait exit signal
 	{
 		osSignals := make(chan os.Signal, 1)

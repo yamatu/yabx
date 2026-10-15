@@ -7,55 +7,102 @@ import (
 	"sync"
 
 	"github.com/hashicorp/go-multierror"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/conf"
 )
 
+// coreEntry is one configured core. The core itself is created the first time a
+// node is added to it, so a core no node uses costs nothing.
+type coreEntry struct {
+	// key is the Name of the core, or its Type when it has none.
+	key    string
+	typ    string
+	config conf.CoreConfig
+	core   Core
+}
+
 type Selector struct {
-	cores map[string]Core
-	nodes sync.Map
+	mu      sync.Mutex
+	entries []*coreEntry
+	nodes   sync.Map
 }
 
 func NewSelector(c []conf.CoreConfig) (Core, error) {
-	cs := make(map[string]Core, len(c))
+	if len(c) == 0 {
+		return nil, errors.New("no core is configured")
+	}
+	entries := make([]*coreEntry, 0, len(c))
 	for _, t := range c {
-		f, ok := cores[strings.ToLower(t.Type)]
-		if !ok {
+		typ := strings.ToLower(t.Type)
+		if _, ok := cores[typ]; !ok {
 			return nil, errors.New("unknown core type: " + t.Type)
 		}
-		core1, err := f(&t)
-		if err != nil {
-			return nil, err
+		key := t.Name
+		if key == "" {
+			key = t.Type
 		}
-		if t.Name == "" {
-			cs[t.Type] = core1
-		} else {
-			cs[t.Name] = core1
-		}
+		entries = append(entries, &coreEntry{key: key, typ: typ, config: t})
 	}
-	return &Selector{
-		cores: cs,
-	}, nil
+	return &Selector{entries: entries}, nil
+}
+
+// ownsInbounds reports whether the core config defines inbounds of its own,
+// which have to listen even when no node is added to that core.
+func ownsInbounds(c *conf.CoreConfig) bool {
+	switch {
+	case c.XrayConfig != nil && c.XrayConfig.InboundConfigPath != "":
+		return true
+	case c.SingConfig != nil && c.SingConfig.OriginalPath != "":
+		return true
+	}
+	return false
 }
 
 func (s *Selector) Start() error {
-	for i := range s.cores {
-		err := s.cores[i].Start()
-		if err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.entries {
+		if !ownsInbounds(&e.config) {
+			continue
+		}
+		if err := s.startLocked(e); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func (s *Selector) startLocked(e *coreEntry) error {
+	if e.core != nil {
+		return nil
+	}
+	c, err := cores[e.typ].new(&e.config)
+	if err != nil {
+		return fmt.Errorf("create core %s error: %w", e.key, err)
+	}
+	if err = c.Start(); err != nil {
+		_ = c.Close()
+		return fmt.Errorf("start core %s error: %w", e.key, err)
+	}
+	e.core = c
+	log.WithField("core", e.key).Info("Core started")
+	return nil
+}
+
 func (s *Selector) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var errs error
-	for i := range s.cores {
-		err := s.cores[i].Close()
-		if err != nil {
+	for _, e := range s.entries {
+		if e.core == nil {
+			continue
+		}
+		if err := e.core.Close(); err != nil {
 			errs = multierror.Append(errs, err)
 		}
+		e.core = nil
 	}
 	return errs
 }
@@ -69,28 +116,48 @@ func isSupported(protocol string, protocols []string) bool {
 	return false
 }
 
-func (s *Selector) AddNode(tag string, info *panel.NodeInfo, option *conf.Options) error {
-	var core Core
+// pickLocked chooses the core of a node. Among several candidates a running core
+// wins, so nodes that do not name their core do not start a second one.
+func (s *Selector) pickLocked(info *panel.NodeInfo, option *conf.Options) *coreEntry {
 	if len(option.CoreName) > 0 {
-		// use name to select core
-		if c, ok := s.cores[option.CoreName]; ok {
-			core = c
+		for _, e := range s.entries {
+			if e.key == option.CoreName {
+				return e
+			}
 		}
-	} else {
-		// use type to select core
-		for _, c := range s.cores {
-			if len(option.Core) == 0 {
-				if !isSupported(info.Type, c.Protocols()) {
-					continue
-				}
-			} else if option.Core != c.Type() {
+		return nil
+	}
+	var first *coreEntry
+	for _, e := range s.entries {
+		if len(option.Core) == 0 {
+			if !isSupported(info.Type, cores[e.typ].protocols) {
 				continue
 			}
-			core = c
+		} else if option.Core != e.typ {
+			continue
+		}
+		if e.core != nil {
+			return e
+		}
+		if first == nil {
+			first = e
 		}
 	}
-	if core == nil {
+	return first
+}
+
+func (s *Selector) AddNode(tag string, info *panel.NodeInfo, option *conf.Options) error {
+	s.mu.Lock()
+	e := s.pickLocked(info, option)
+	if e == nil {
+		s.mu.Unlock()
 		return errors.New("the node type is not support")
+	}
+	err := s.startLocked(e)
+	core := e.core
+	s.mu.Unlock()
+	if err != nil {
+		return err
 	}
 	if len(option.Core) == 0 {
 		option.Core = core.Type()
@@ -100,7 +167,7 @@ func (s *Selector) AddNode(tag string, info *panel.NodeInfo, option *conf.Option
 		}
 		option.RawOptions = nil
 	}
-	err := core.AddNode(tag, info, option)
+	err = core.AddNode(tag, info, option)
 	if err != nil {
 		return err
 	}
@@ -154,27 +221,16 @@ func (s *Selector) DelUsers(users []panel.UserInfo, tag string, info *panel.Node
 
 func (s *Selector) Protocols() []string {
 	protocols := make([]string, 0)
-	for i := range s.cores {
-		protocols = append(protocols, s.cores[i].Protocols()...)
+	for _, e := range s.entries {
+		protocols = append(protocols, cores[e.typ].protocols...)
 	}
 	return protocols
 }
 
 func (s *Selector) Type() string {
-	t := "Selector("
-	var flag bool
-	for n, c := range s.cores {
-		if flag {
-			t += " "
-		} else {
-			flag = true
-		}
-		if len(n) == 0 {
-			t += c.Type()
-		} else {
-			t += n
-		}
+	keys := make([]string, 0, len(s.entries))
+	for _, e := range s.entries {
+		keys = append(keys, e.key)
 	}
-	t += ")"
-	return t
+	return "Selector(" + strings.Join(keys, " ") + ")"
 }

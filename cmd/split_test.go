@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -205,6 +206,64 @@ func TestSplitCopiesTheConfiguredDnsContent(t *testing.T) {
 		}
 		if string(content) != `{"servers":["1.1.1.1"],"tag":"dns_inbound"}` {
 			t.Fatalf("%s DNS file = %s", file.Name, content)
+		}
+	}
+}
+
+// TestSplitKeepsOnlyTheCoresANodeUses: copying every core into every process
+// made each instance build and run kernels none of its nodes use.
+func TestSplitKeepsOnlyTheCoresANodeUses(t *testing.T) {
+	raw := []byte(`{
+	  "Cores": [
+	    {"Type": "sing", "Name": "sing1", "DnsConfigPath": "/etc/V2bX/sing_dns.json"},
+	    {"Type": "sing", "Name": "sing2"},
+	    {"Type": "xray", "DnsConfigPath": "/etc/V2bX/dns.json"}
+	  ],
+	  "Nodes": [
+	    {"Name": "by-name", "CoreName": "sing2", "NodeID": 1, "NodeType": "vless"},
+	    {"Name": "by-type", "Core": "xray", "NodeID": 2, "NodeType": "vless"},
+	    {"Name": "nested", "ApiConfig": {"NodeID": 3}, "Options": {"Core": "sing"}},
+	    {"Name": "unnamed-key", "CoreName": "xray", "NodeID": 4, "NodeType": "vless"},
+	    {"Name": "auto", "NodeID": 5, "NodeType": "vless"},
+	    {"Name": "unknown", "CoreName": "nope", "NodeID": 6, "NodeType": "vless"}
+	  ]
+	}`)
+	files, err := buildSplitConfigs(raw, t.TempDir())
+	if err != nil {
+		t.Fatalf("buildSplitConfigs: %v", err)
+	}
+	want := map[string][]string{
+		"by-name":     {"sing2"},
+		"by-type":     {"xray"},
+		"nested":      {"sing1", "sing2"},
+		"unnamed-key": {"xray"},
+		"auto":        {"sing1", "sing2", "xray"},
+		"unknown":     {"sing1", "sing2", "xray"},
+	}
+	for _, file := range files {
+		var doc struct {
+			Instances int
+			Cores     []struct{ Type, Name string }
+		}
+		if err := json.Unmarshal(file.Content, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc.Instances != len(want) {
+			t.Fatalf("%s Instances = %d, want %d", file.Name, doc.Instances, len(want))
+		}
+		var got []string
+		for _, c := range doc.Cores {
+			key := c.Name
+			if key == "" {
+				key = c.Type
+			}
+			got = append(got, key)
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want[file.Name]) {
+			t.Fatalf("%s keeps cores %v, want %v", file.Name, got, want[file.Name])
+		}
+		if file.Name == "by-name" && len(file.Dns) != 0 {
+			t.Fatalf("by-name copies the DNS file of a core it does not use: %v", file.Dns)
 		}
 	}
 }

@@ -34,8 +34,20 @@ type Sing struct {
 	naiveState map[string]*naiveInboundState
 }
 
+var protocols = []string{
+	"vmess",
+	"vless",
+	"shadowsocks",
+	"trojan",
+	"tuic",
+	"anytls",
+	"naive",
+	"hysteria",
+	"hysteria2",
+}
+
 func init() {
-	vCore.RegisterCore("sing", New)
+	vCore.RegisterCore("sing", New, protocols)
 }
 
 func New(c *conf.CoreConfig) (vCore.Core, error) {
@@ -95,17 +107,7 @@ func (b *Sing) Close() error {
 }
 
 func (b *Sing) Protocols() []string {
-	return []string{
-		"vmess",
-		"vless",
-		"shadowsocks",
-		"trojan",
-		"tuic",
-		"anytls",
-		"naive",
-		"hysteria",
-		"hysteria2",
-	}
+	return protocols
 }
 
 func (b *Sing) Type() string {

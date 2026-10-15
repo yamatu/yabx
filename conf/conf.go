@@ -14,6 +14,9 @@ type Conf struct {
 	LogConfig   LogConfig    `json:"Log"`
 	CoresConfig []CoreConfig `json:"Cores"`
 	NodeConfig  []NodeConfig `json:"Nodes"`
+	// Instances is the number of V2bX processes sharing this machine (written by
+	// `V2bX split`); the memory budget is divided between them.
+	Instances int `json:"Instances"`
 }
 
 func New() *Conf {

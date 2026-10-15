@@ -57,8 +57,10 @@ func (h *Hysteria2) nodesSnapshot() []Hysteria2node {
 	return nodes
 }
 
+var protocols = []string{"hysteria2"}
+
 func init() {
-	vCore.RegisterCore("hysteria2", New)
+	vCore.RegisterCore("hysteria2", New, protocols)
 }
 
 func New(c *conf.CoreConfig) (vCore.Core, error) {
@@ -80,9 +82,7 @@ func New(c *conf.CoreConfig) (vCore.Core, error) {
 }
 
 func (h *Hysteria2) Protocols() []string {
-	return []string{
-		"hysteria2",
-	}
+	return protocols
 }
 
 func (h *Hysteria2) Start() error {
