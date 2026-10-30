@@ -452,7 +452,7 @@ pick_instance() {
     return 0
   fi
   for name in "${names[@]}"; do
-    echo "  $i) $name"
+    echo "  $i) $name" >&2
     i=$((i + 1))
   done
   read -r -p "请选择实例编号: " choice
