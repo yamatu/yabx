@@ -95,7 +95,7 @@ jobs:
           # END Other architectures
       fail-fast: false
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
@@ -149,7 +149,14 @@ jobs:
         run: |
           echo "version: $version"
           mkdir -p build_assets
-          go build -v -o build_assets/V2bX -tags "xray sing with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=$version' -s -w -buildid="
+          # github.com/wlynxg/anet (pulled in by xray through pion/stun) linknames
+          # net.zoneCache on Android, which Go >= 1.23 rejects by default. Xray's
+          # own Android build passes the same flag.
+          extra_ldflags=""
+          if [[ "$GOOS" == "android" ]]; then
+            extra_ldflags="-checklinkname=0"
+          fi
+          go build -v -o build_assets/V2bX -tags "xray sing with_reality_server with_quic with_grpc with_utls with_wireguard with_acme" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=$version' -s -w -buildid= $extra_ldflags"
 
       - name: Build Mips softfloat V2bX
         if: matrix.goarch == 'mips' || matrix.goarch == 'mipsle'
