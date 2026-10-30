@@ -885,6 +885,13 @@ Naive:
 3) 示例配置: /etc/V2bX/config_naive.json
 4) naive 需要 TLS 证书，CertMode 不能为 none
 
+Hysteria2:
+1) 面板节点协议请使用 hysteria2
+2) 本地节点 Core 请使用 sing
+3) 示例配置: /etc/V2bX/config_hysteria2.json
+4) hysteria2 需要 TLS 证书，CertMode 不能为 none
+5) hysteria2 走 UDP，防火墙需放行节点端口的 UDP
+
 通用:
 1) 主配置文件: /etc/V2bX/config.json
 提示: 修改完配置后执行 v2bx restart
@@ -932,7 +939,7 @@ v2bx 命令用法:
   v2bx acme [action]   Cloudflare DNS cert setup/issue/renew/status/edit
   v2bx x25519          生成 X25519 密钥
   v2bx version         查看版本(含内核)
-  v2bx xhttp           显示 xhttp / naive 使用说明
+  v2bx xhttp           显示 xhttp / naive / hysteria2 使用说明
   v2bx naive           显示 naive 使用说明
 EOF
 }
@@ -959,8 +966,8 @@ V2bX 管理菜单
 10. 取消开机自启
 11. 生成 X25519 密钥
 12. 查看 V2bX / 内核版本
-13. 配置向导(新建/重建 config.json, 含 xhttp / naive 预设)
-14. 协议示例说明(xhttp / naive)
+13. 配置向导(新建/重建 config.json, 含 xhttp / naive / hysteria2 预设)
+14. 协议示例说明(xhttp / naive / hysteria2)
 15. Cloudflare DNS ACME certificate
 16. 多进程模式(每节点独立进程)
 17. 退出

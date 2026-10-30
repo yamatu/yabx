@@ -17,7 +17,7 @@ SOURCE_REF="${SOURCE_REF:-main}"
 # Sidecar configs that are copied into CONFIG_DIR. They are never replaced
 # silently: an update asks first unless --configs says otherwise. config.json is
 # not in this list, it holds the node credentials and is only ever created.
-CONFIG_TEMPLATES="dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json xhttp_template.conf"
+CONFIG_TEMPLATES="dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json config_hysteria2.json xhttp_template.conf"
 CONFIG_MODE="ask"
 CONFIGS_ONLY="0"
 VERSION_ARG=""
@@ -351,7 +351,7 @@ install_from_source() {
   chmod +x "$INSTALL_DIR/$BIN_NAME"
 
   if [[ -d "$src_dir/example" ]]; then
-    for file in config.json dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json geoip.dat geosite.dat; do
+    for file in config.json dns.json route.json custom_outbound.json custom_inbound.json config_xhttp_reality.json config_naive.json config_hysteria2.json geoip.dat geosite.dat; do
       if [[ -f "$src_dir/example/$file" ]]; then
         cp -f "$src_dir/example/$file" "$INSTALL_DIR/$file"
       fi
@@ -675,6 +675,7 @@ install_assets() {
 
   ensure_example_asset "$ref" "config_xhttp_reality.json"
   ensure_example_asset "$ref" "config_naive.json"
+  ensure_example_asset "$ref" "config_hysteria2.json"
 
   if [[ -f "$INSTALL_DIR/geoip.dat" ]]; then
     cp -f "$INSTALL_DIR/geoip.dat" "$CONFIG_DIR/geoip.dat"
@@ -886,7 +887,7 @@ main() {
     fi
   else
     log_warn "First install detected. Edit /etc/V2bX/config.json before starting service."
-    log_warn "Examples: /etc/V2bX/config_xhttp_reality.json /etc/V2bX/config_naive.json /etc/V2bX/xhttp_template.conf"
+    log_warn "Examples: /etc/V2bX/config_xhttp_reality.json /etc/V2bX/config_naive.json /etc/V2bX/config_hysteria2.json /etc/V2bX/xhttp_template.conf"
     log_info "Start command: systemctl start V2bX"
   fi
 
