@@ -374,3 +374,5 @@ replace github.com/anytls/sing-anytls v0.0.8 => github.com/Fearless743/sing-anyt
 replace github.com/quic-go/quic-go => github.com/quic-go/quic-go v0.56.0
 
 replace github.com/quic-go/qpack => ./third_party/qpack
+
+replace github.com/xtls/reality => ./third_party/reality
