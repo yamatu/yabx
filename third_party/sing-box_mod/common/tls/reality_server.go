@@ -117,6 +117,10 @@ func NewRealityServer(ctx context.Context, logger log.Logger, options option.Inb
 		tlsConfig.Show = true
 	}
 
+	// reality.Server waits for this probe's result before finishing every
+	// handshake; without it each authenticated connection stalls forever.
+	go reality.DetectPostHandshakeRecordsLens(&tlsConfig)
+
 	return &RealityServerConfig{&tlsConfig}, nil
 }
 
