@@ -30,8 +30,9 @@ type Decoder struct{}
 // Any error other than io.EOF indicates a decoding error.
 type DecodeFunc func() (HeaderField, error)
 
-// NewDecoder returns a new Decoder.
-func NewDecoder() *Decoder {
+// NewDecoder returns a new Decoder. The ignored argument keeps the v0.5
+// signature callable; see compat_v05.go.
+func NewDecoder(_ ...func(f HeaderField)) *Decoder {
 	return &Decoder{}
 }
 

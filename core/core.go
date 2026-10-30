@@ -10,7 +10,8 @@ type registration struct {
 }
 
 var (
-	cores = map[string]registration{}
+	cores        = map[string]registration{}
+	coreVersions = map[string]string{}
 )
 
 // NewCore always returns a Selector, even for one core: the Selector fills in
@@ -24,6 +25,17 @@ func NewCore(c []conf.CoreConfig) (Core, error) {
 // be chosen for a node without creating it first.
 func RegisterCore(t string, f func(c *conf.CoreConfig) (Core, error), protocols []string) {
 	cores[t] = registration{new: f, protocols: protocols}
+}
+
+// RegisterCoreVersion records the release version a core reports about itself,
+// for kernels whose module version is a pseudo-version (xray tags v26.x.y but
+// publishes the module as v1.2xxxxx).
+func RegisterCoreVersion(t, version string) {
+	coreVersions[t] = version
+}
+
+func RegisteredCoreVersions() map[string]string {
+	return coreVersions
 }
 
 func RegisteredCore() []string {

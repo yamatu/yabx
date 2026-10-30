@@ -21,16 +21,16 @@ func buildOutbound(config *conf2.Options, tag string) (*core.OutboundHandlerConf
 		outboundDetourConfig.SendThrough = &config.SendIP
 	}
 
-	// Freedom Protocol setting
-	var domainStrategy = "Asis"
+	// xray-core deprecated freedom.domainStrategy in favour of sockopt.domainStrategy.
 	if config.XrayOptions.EnableDNS {
-		domainStrategy = normalizeDomainStrategy(config.XrayOptions.DNSType)
-	}
-	proxySetting := &conf.FreedomConfig{
-		DomainStrategy: domainStrategy,
+		outboundDetourConfig.StreamSetting = &conf.StreamConfig{
+			SocketSettings: &conf.SocketConfig{
+				DomainStrategy: normalizeDomainStrategy(config.XrayOptions.DNSType),
+			},
+		}
 	}
 	var setting json.RawMessage
-	setting, err := json.Marshal(proxySetting)
+	setting, err := json.Marshal(&conf.FreedomConfig{})
 	if err != nil {
 		return nil, fmt.Errorf("marshal proxy config error: %s", err)
 	}

@@ -36,6 +36,7 @@ var protocols = []string{
 
 func init() {
 	vCore.RegisterCore("xray", New, protocols)
+	vCore.RegisterCoreVersion("xray", "v"+core.Version())
 }
 
 // Xray Structure

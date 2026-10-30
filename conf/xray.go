@@ -127,7 +127,7 @@ type XrayOptions struct {
 	DNSType             string                  `json:"DNSType"`
 	EnableUot           bool                    `json:"EnableUot"`
 	EnableTFO           bool                    `json:"EnableTFO"`
-	DisableIVCheck      bool                    `json:"DisableIVCheck"`
+	DisableIVCheck      bool                    `json:"DisableIVCheck"` // ignored: xray-core dropped the IV check with non-AEAD ciphers
 	DisableSniffing     bool                    `json:"DisableSniffing"`
 	EnableFallback      bool                    `json:"EnableFallback"`
 	FallBackConfigs     []FallBackConfigForXray `json:"FallBackConfigs"`

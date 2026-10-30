@@ -26,20 +26,22 @@ func installedCoreVersions() []string {
 	if !ok {
 		return nil
 	}
-	return coreVersionLines(info.Deps, vCore.RegisteredCore())
+	return coreVersionLines(info.Deps, vCore.RegisteredCore(), vCore.RegisteredCoreVersions())
 }
 
 // coreVersionLines is the pure part of installedCoreVersions: it only reports
-// cores that are both registered and present in the module list.
-func coreVersionLines(deps []*debug.Module, registered []string) []string {
+// cores that are both registered and present in the module list. A version a
+// core reports about itself wins over the module version.
+func coreVersionLines(deps []*debug.Module, registered []string, reported map[string]string) []string {
 	versions := make(map[string]string, len(deps))
 	for _, dep := range deps {
 		if dep == nil {
 			continue
 		}
 		versions[dep.Path] = dep.Version
-		if dep.Replace != nil {
-			// The replacement is the module the linker actually used.
+		// The replacement is the module the linker actually used. A directory
+		// replacement has no version of its own, so keep the required one.
+		if dep.Replace != nil && dep.Replace.Version != "" && dep.Replace.Version != "(devel)" {
 			versions[dep.Path] = dep.Replace.Version
 		}
 	}
@@ -50,9 +52,14 @@ func coreVersionLines(deps []*debug.Module, registered []string) []string {
 		if !known {
 			continue
 		}
-		if version := versions[module]; version != "" {
-			lines = append(lines, name+" "+version)
+		version := versions[module]
+		if version == "" {
+			continue
 		}
+		if v := reported[name]; v != "" {
+			version = v
+		}
+		lines = append(lines, name+" "+version)
 	}
 	sort.Strings(lines)
 	return lines

@@ -344,6 +344,8 @@ install_from_source() {
       fi
     fi
     export CGO_ENABLED=0
+    # Distro Go packages often pin GOTOOLCHAIN=local in go.env; go.mod names the toolchain to fetch.
+    export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
     go mod download
     go build -v -o "$INSTALL_DIR/$BIN_NAME" -tags "$build_tags" -trimpath -ldflags "-s -w -buildid="
   )

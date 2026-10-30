@@ -1,20 +1,22 @@
 # Build go
-# Must match the toolchain in go.mod (toolchain go1.25.2). The official golang
+# Must match the toolchain in go.mod (toolchain go1.27.3). The official golang
 # images set GOTOOLCHAIN=local, so an older base image makes `go mod download`
-# fail with "go.mod requires go >= 1.25".
+# fail with "go.mod requires go >= 1.27".
 #
 # The builder runs on the build platform and cross compiles for the target one.
 # With CGO disabled Go does not need a target toolchain or an emulator, and the
 # arm64 half of the image stops being built under QEMU: that step took 39 minutes
 # on the release runner, the cross build takes about a minute.
-FROM --platform=$BUILDPLATFORM golang:1.25.2-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /app
 ENV CGO_ENABLED=0
 # The module files come first so editing a source file does not invalidate the
-# download layer.
+# download layer. go.mod replaces modules with directories under third_party/,
+# which have to exist before the download.
 COPY go.mod go.sum ./
+COPY third_party ./third_party
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 COPY . .

@@ -247,7 +247,7 @@ func TestRealityHandshakeWithOversizedTargetCertificate(t *testing.T) {
 		Type:                   "tcp",
 		Dest:                   targetAddr,
 		ServerNames:            map[string]bool{"localhost": true},
-		PrivateKey:             priv.Bytes(),
+		PrivateKey:             priv,
 		MaxTimeDiff:            time.Minute,
 		ShortIds:               map[[8]byte]bool{shortIDArr: true},
 		SessionTicketsDisabled: true,
